@@ -1,148 +1,122 @@
 import React, { useState } from 'react';
-import { Header, ActiveTab } from './components/Header';
-import { PromptBuilder } from './components/PromptBuilder';
-import { MockupStudio } from './components/MockupStudio';
-import { DesignGallery } from './components/DesignGallery';
+import { Header } from './components/Header';
+import { DesignStudio } from './components/DesignStudio';
 import { GeneratedDesign } from './types';
-import { generateProductMockupCanvas, triggerDownload } from './utils/exportMockup';
 
 const INITIAL_VITRAIL_DESIGN: GeneratedDesign = {
   id: 'preset-sample-vitrail-01',
-  title: 'Kitsune Samurai (Stained Glass)',
-  prompt: `A breathtaking 2D anime illustration of celestial fox spirit samurai dual-wielding glowing katanas in a dynamic mid-air leap
+  title: 'Woodland Fox & Sunburst (Stained Glass)',
+  prompt: `Masterpiece authentic cathedral stained glass window (vitrail), symmetrical arched vertical composition.
 
-surrounded by cherry blossoms and weeping wisteria branches, and a spirit fox with nine flame tails.
+In the center, a peaceful sleeping red fox curled in a tight circle with fluffy tail wrapped around its body.
 
-The entire composition is designed in an intricate, vibrant stained glass
-(vitrail) mosaic style.
+Directly behind the subject is a radiant segmented sunburst halo with glowing amber and golden glass rays, with a golden crescent moon and twinkling stars in the upper arch.
 
-Thick, elegant black outlines, translucent and luminous
-deep sapphire indigo, vibrant crimson, luminous gold, and ethereal cyan.
+Framed and grounded along the base and sides by red fly agaric mushrooms with white dots, golden chanterelles, acorns, autumn oak leaves, forest berries, and woodland fern fronds, and accompanied by subtle glowing woodland sprites and tiny sleeping dormice tucked among the leaves.
 
-High-detail anime art style infused with Art Nouveau
-art nouveau brass filigree frame with celestial star constellations borders.
+Rich translucent jewel-tone color palette of warm amber gold, fiery autumn orange, deep russet red, forest moss green, deep teal indigo, and dark leaded came metallic outlines.
 
-Flat lay, purely 2D graphic design, completely flat background.
+Enclosed within an intricate Art Nouveau cathedral arched stained-glass frame with curving leadline came tracery, amber glass cabochons, and decorative border tiles.
 
-Centered vertical composition, perfectly cropped for a rectangular print canvas.
+Authentic leaded came solder outlines, segmented colored glass panes, translucent backlit stained glass radiance, Louis Comfort Tiffany stained glass style, fine Art Nouveau botanical tracery, subtle glass textures and beveled leadlines.
 
-No shading or 3D depth outside of the anime illustration style.
+Pure 2D flat-lay graphic art print, vertical 9:16 aspect ratio, clean full-bleed decorative art piece, sharp fine details, high-end collector print.
 
-Aspect ratio: 9:16.
-
-Do not include:
-phone, phone case, mockup, device, shadows, 3D render, realistic photography.`,
+Do not include: phone, phone case, mockup, device, realistic photography, 3D render, modern clutter, shadows.`,
   imageUrl: '/src/assets/images/sample_vitrail_pure2d_1790462384613.jpg',
-  niche: 'Anime Vitrail (Stained Glass)',
+  niche: 'Woodland Fox & Sunburst (Stained Glass)',
   createdAt: Date.now(),
   placeholders: {
     SUBJECT_POSE:
-      'celestial fox spirit samurai dual-wielding glowing katanas in a dynamic mid-air leap',
-    BOTANICAL: 'cherry blossoms and weeping wisteria branches',
-    COMPANION: 'spirit fox with nine flame tails',
-    COLOR_PALETTE: 'deep sapphire indigo, vibrant crimson, luminous gold, and ethereal cyan',
-    BORDER_THEME: 'art nouveau brass filigree frame with celestial star constellations',
+      'a peaceful sleeping red fox curled in a tight circle with fluffy tail wrapped around its body',
+    HALO_BACKGROUND:
+      'a radiant segmented sunburst halo with glowing amber and golden glass rays, with a golden crescent moon and twinkling stars in the upper arch',
+    BOTANICAL:
+      'red fly agaric mushrooms with white dots, golden chanterelles, acorns, autumn oak leaves, forest berries, and woodland fern fronds',
+    COMPANION:
+      'subtle glowing woodland sprites and tiny sleeping dormice tucked among the leaves',
+    COLOR_PALETTE:
+      'warm amber gold, fiery autumn orange, deep russet red, forest moss green, deep teal indigo, and dark leaded came metallic outlines',
+    BORDER_THEME:
+      'Art Nouveau cathedral arched stained-glass frame with curving leadline came tracery, amber glass cabochons, and decorative border tiles',
   },
   isPreset: true,
+  aspectRatio: '9:16',
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('prompt-studio');
   const [designs, setDesigns] = useState<GeneratedDesign[]>([INITIAL_VITRAIL_DESIGN]);
-  const [activeDesign, setActiveDesign] = useState<GeneratedDesign>(INITIAL_VITRAIL_DESIGN);
+  const [activeDesign, setActiveDesign] = useState<GeneratedDesign | null>(INITIAL_VITRAIL_DESIGN);
+  const [resetKey, setResetKey] = useState<number>(0);
 
-  // When a new design is generated or selected -> auto navigate to mockups
   const handleDesignGenerated = (newDesign: GeneratedDesign) => {
     setDesigns((prev) => [newDesign, ...prev]);
     setActiveDesign(newDesign);
-    setActiveTab('mockup-studio');
   };
 
   const handleSelectDesign = (design: GeneratedDesign) => {
     setActiveDesign(design);
-    setActiveTab('mockup-studio');
   };
 
-  const handleUploadDesign = (uploadedDesign: GeneratedDesign) => {
-    setDesigns((prev) => [uploadedDesign, ...prev]);
-    setActiveDesign(uploadedDesign);
-    // Instant automatic transition to iPhone + Samsung mockups on upload!
-    setActiveTab('mockup-studio');
+  const handleDeleteDesign = (id: string) => {
+    setDesigns((prev) => {
+      const filtered = prev.filter((d) => d.id !== id);
+      if (activeDesign?.id === id) {
+        setActiveDesign(filtered.length > 0 ? filtered[0] : null);
+      }
+      return filtered;
+    });
   };
 
-  // Quick export from Header (Exports both iPhone + Samsung)
-  const handleQuickExport = async () => {
+  const handleReset = () => {
+    setResetKey((prev) => prev + 1);
+  };
+
+  const handleDownloadCurrent = () => {
     if (!activeDesign) return;
-    try {
-      const iphoneDataUrl = await generateProductMockupCanvas({
-        artworkUrl: activeDesign.imageUrl,
-        device: 'iphone-16-pro',
-        finish: 'liquid-gloss',
-        frameColorId: 'obsidian-black',
-        showMagsafe: false,
-        glossIntensity: 80,
-      });
-      triggerDownload(iphoneDataUrl, `iphone-16-pro-mockup-${Date.now()}.png`);
-
-      setTimeout(async () => {
-        const samsungDataUrl = await generateProductMockupCanvas({
-          artworkUrl: activeDesign.imageUrl,
-          device: 'samsung-s25-ultra',
-          finish: 'liquid-gloss',
-          frameColorId: 'obsidian-black',
-          showMagsafe: false,
-          glossIntensity: 80,
-        });
-        triggerDownload(samsungDataUrl, `samsung-s25-ultra-mockup-${Date.now()}.png`);
-      }, 300);
-    } catch (err) {
-      console.error('Quick export failed:', err);
-    }
+    const link = document.createElement('a');
+    link.href = activeDesign.imageUrl;
+    link.download = `${activeDesign.title.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${Date.now()}.jpg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
-      {/* Top Navigation */}
+      {/* Top Header */}
       <Header
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        onExportCurrent={handleQuickExport}
+        onReset={handleReset}
+        onDownloadCurrent={activeDesign ? handleDownloadCurrent : undefined}
         hasArtwork={Boolean(activeDesign)}
+        activeDesignTitle={activeDesign?.title}
       />
 
-      {/* Main Content Area */}
+      {/* Main Design Studio Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeTab === 'prompt-studio' && (
-          <PromptBuilder
-            onDesignGenerated={(newDesign) => {
-              handleDesignGenerated(newDesign);
-            }}
-            activeDesign={activeDesign}
-            onNavigateToMockups={() => setActiveTab('mockup-studio')}
-          />
-        )}
-
-        {activeTab === 'mockup-studio' && (
-          <MockupStudio
-            activeDesign={activeDesign}
-            onUploadNew={() => setActiveTab('design-library')}
-          />
-        )}
-
-        {activeTab === 'design-library' && (
-          <DesignGallery
-            designs={designs}
-            activeDesignId={activeDesign?.id || ''}
-            onSelectDesign={handleSelectDesign}
-            onUploadDesign={handleUploadDesign}
-            onOpenMockupStudio={() => setActiveTab('mockup-studio')}
-          />
-        )}
+        <DesignStudio
+          key={resetKey}
+          activeDesign={activeDesign}
+          designs={designs}
+          onSelectDesign={handleSelectDesign}
+          onDeleteDesign={handleDeleteDesign}
+          onDesignGenerated={handleDesignGenerated}
+        />
       </main>
 
       {/* Footer */}
       <footer className="border-t border-slate-800/80 bg-slate-950/80 py-4 text-center text-xs text-slate-500">
-        <p>CaseCraft Studio • Automatic iPhone & Samsung Phone Case Mockup Generator</p>
+        <p>
+          CaseCraft Design Studio • Powered by{' '}
+          <a
+            href="https://pollinations.ai"
+            target="_blank"
+            rel="noreferrer"
+            className="text-indigo-400 hover:underline"
+          >
+            Pollinations API
+          </a>
+        </p>
       </footer>
     </div>
   );

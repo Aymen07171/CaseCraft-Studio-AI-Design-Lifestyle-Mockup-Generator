@@ -3,7 +3,6 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { GoogleGenAI } from '@google/genai';
 
 dotenv.config();
 
@@ -15,365 +14,198 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json({ limit: '25mb' }));
 
-// Shared Gemini Client
-const getGeminiClient = () => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return null;
-  }
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
+// Pollinations API Key from environment or user-provided configuration
+const getPollinationsKey = (): string => {
+  return process.env.POLLINATIONS_API_KEY || 'sk_7hxiVgx2Ngtoc3coIgOT3NPPKNzHkc3j';
 };
 
-// API: Generate Design Artwork
+// API: Generate Design Artwork using Pollinations API
 app.post('/api/generate-design', async (req, res) => {
   try {
-    const { prompt, aspectRatio = '9:16' } = req.body;
-    if (!prompt) {
+    const { prompt, aspectRatio = '9:16', seed, model = 'flux' } = req.body;
+    if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
       return res.status(400).json({ error: 'Prompt is required' });
     }
 
-    const ai = getGeminiClient();
-    if (!ai) {
-      return res.status(503).json({
-        error: 'Gemini API key is not configured. Please verify GEMINI_API_KEY in the Secrets panel.',
-      });
+    // Determine dimensions based on aspect ratio
+    let width = 768;
+    let height = 1344; // 9:16 vertical canvas
+    if (aspectRatio === '1:1') {
+      width = 1024;
+      height = 1024;
+    } else if (aspectRatio === '3:4') {
+      width = 768;
+      height = 1024;
+    } else if (aspectRatio === '4:3') {
+      width = 1024;
+      height = 768;
+    } else if (aspectRatio === '16:9') {
+      width = 1344;
+      height = 768;
+    } else if (aspectRatio === '9:16') {
+      width = 768;
+      height = 1344;
     }
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite-image',
-      contents: {
-        parts: [{ text: prompt }],
-      },
-      config: {
-        imageConfig: {
-          aspectRatio: aspectRatio as '9:16' | '1:1' | '3:4' | '4:3' | '16:9',
-        },
+    const randomSeed =
+      seed !== undefined && seed !== null && !isNaN(Number(seed))
+        ? Number(seed)
+        : Math.floor(Math.random() * 1000000000);
+
+    const cleanPrompt = prompt.trim();
+    const encodedPrompt = encodeURIComponent(cleanPrompt);
+    const apiKey = getPollinationsKey();
+
+    // Build Pollinations API image URL with API key
+    const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${randomSeed}&nologo=true&model=${encodeURIComponent(model)}&key=${encodeURIComponent(apiKey)}`;
+
+    console.log(`[Pollinations API] Generating image: model=${model}, width=${width}, height=${height}, seed=${randomSeed}`);
+
+    // Fetch the image from Pollinations API with Bearer token authentication
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+    const response = await fetch(pollinationsUrl, {
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'User-Agent': 'Mozilla/5.0 (compatible; CaseCraftStudio/1.0)',
+        Accept: 'image/jpeg,image/png,image/*;q=0.9',
       },
     });
 
-    let imageUrl: string | null = null;
-    let descriptionText = '';
+    clearTimeout(timeoutId);
 
-    if (response.candidates?.[0]?.content?.parts) {
-      for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) {
-          imageUrl = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
-        } else if (part.text) {
-          descriptionText += part.text;
-        }
-      }
+    if (!response.ok) {
+      throw new Error(`Pollinations API returned status ${response.status}: ${response.statusText}`);
     }
 
-    if (!imageUrl) {
-      return res.status(500).json({
-        error: 'Model did not return image data.',
-        detail: descriptionText,
-      });
-    }
+    const arrayBuffer = await response.arrayBuffer();
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    const dataUrl = `data:${contentType};base64,${base64}`;
 
-    return res.json({ imageUrl, text: descriptionText });
+    return res.json({
+      imageUrl: dataUrl,
+      sourceUrl: pollinationsUrl,
+      seed: randomSeed,
+      width,
+      height,
+      aspectRatio,
+      model,
+    });
   } catch (error: any) {
-    console.error('Error generating design:', error);
-    const msg = error?.message || 'Failed to generate design';
-    let userMsg = msg;
-    if (msg.includes('401') || msg.includes('UNAUTHENTICATED') || msg.includes('authentication credential')) {
-      userMsg = 'Invalid authentication credentials. Please select or verify your API key in the AI Studio Secrets panel.';
-    }
+    console.error('Error generating design via Pollinations API:', error);
+    const msg = error?.message || 'Failed to generate design with Pollinations API';
     return res.status(500).json({
-      error: userMsg,
+      error: msg,
       details: error?.toString(),
     });
   }
 });
 
-// Helper to encode image to base64
-async function encodeImagePart(imageUrl: string) {
-  let base64Data = '';
-  let mimeType = 'image/png';
+// Fallback curated suggestions per common placeholder tag
+const FALLBACK_SUGGESTIONS: Record<string, string[]> = {
+  SUBJECT_POSE: [
+    'celestial kitsune blade dancer soaring through golden clouds',
+    'armored cyber samurai preparing an unsheathing strike',
+    'ancient forest guardian stag crowned with blooming wisteria',
+    'moonlit valkyrie warrior brandishing a spear of pure starlight',
+    'neon streetwear ronin standing on a rain-drenched neon overpass',
+    'winged anime oracle clutching a glowing celestial astrolabe',
+  ],
+  BOTANICAL: [
+    'cherry blossoms dancing across swirling iridescent wind trails',
+    'delicate spider lilies with creeping thorny vines',
+    'golden ginkgo leaves descending into a radiant pool of starlight',
+    'bioluminescent neon moss entwined with weeping willow fronds',
+    'art nouveau lotus blossoms with serpentine gilded stems',
+    'cascading midnight jasmine and deep indigo bellflowers',
+  ],
+  COMPANION: [
+    'spirit fox with nine swirling azure flame tails',
+    'cybernetic scout falcon with glowing geometric wings',
+    'ethereal jade koi gliding effortlessly through mid-air stardust',
+    'golden scarab beetle with wings encrusted in luminous lapis',
+    'shadow dragon whelp curling softly around a celestial orb',
+    'crystallized origami crane with faint prism light trails',
+  ],
+  COLOR_PALETTE: [
+    'deep sapphire indigo, molten gold, crimson scarlet, and ethereal cyan',
+    'neon magenta, electric cyan, midnight charcoal, and acid yellow',
+    'burnished antique gold, velvety sage green, and obsidian black',
+    'pastel sunset peach, lavender dusk, warm cream, and iridescent opal',
+    'deep emerald pine, champagne bronze, and rich burgundy wine',
+    'monochrome graphite with radiant liquid gold accents',
+  ],
+  BORDER_THEME: [
+    'ornate art nouveau brass filigree with constellation charts',
+    'tactical holographic telemetry frame with neon corner brackets',
+    'gothic cathedral pointed stained-glass arch with trefoil relief',
+    'infinite synthwave perspective wireframe horizon with retro grids',
+    'celestial zodiac wheel with gilded lunar phase cycles',
+    'clean modern double-line gold leaf border with crosshair corners',
+  ],
+};
 
-  if (imageUrl.startsWith('data:')) {
-    const match = imageUrl.match(/^data:([^;]+);base64,(.+)$/);
-    if (match) {
-      mimeType = match[1];
-      base64Data = match[2];
-    }
-  } else if (imageUrl.startsWith('/')) {
-    try {
-      const fs = await import('fs');
-      const localPath = path.join(__dirname, imageUrl);
-      if (fs.existsSync(localPath)) {
-        const buf = fs.readFileSync(localPath);
-        base64Data = buf.toString('base64');
-        mimeType = imageUrl.endsWith('.png') ? 'image/png' : 'image/jpeg';
-      }
-    } catch (e) {
-      console.error('Error reading local file:', e);
-    }
-  }
-
-  if (base64Data) {
-    return {
-      inlineData: {
-        mimeType,
-        data: base64Data,
-      },
-    };
-  }
-  return null;
-}
-
-// API: Generate AI Lifestyle Scene using Printify Reference Mockup & Preserved Artwork
-app.post('/api/generate-lifestyle-scene', async (req, res) => {
-  try {
-    const {
-      designImageUrl,
-      productMockupUrl,
-      userScenePrompt,
-      modelName = 'iPhone 15 Pro',
-      brand = 'apple',
-      caseType = 'Tough Case',
-      dimensions,
-      cameraCutoutDesc,
-      variationIndex = 1,
-    } = req.body;
-
-    if (!designImageUrl) {
-      return res.status(400).json({ error: 'Design artwork image is required' });
-    }
-
-    const ai = getGeminiClient();
-    if (!ai) {
-      return res.status(503).json({
-        error: 'Gemini API key is not configured. Please select your API key in AI Studio.',
-      });
-    }
-
-    const parts: any[] = [];
-
-    // Part 1: High-Priority Preserved Artwork
-    const designPart = await encodeImagePart(designImageUrl);
-    if (designPart) {
-      parts.push(designPart);
-    }
-
-    // Part 2: Product Reference Mockup (Clean 2D Printify Case)
-    if (productMockupUrl) {
-      const mockupPart = await encodeImagePart(productMockupUrl);
-      if (mockupPart) {
-        parts.push(mockupPart);
-      }
-    }
-
-    // Construct the 2-Stage Strict Lifestyle Generation Prompt
-    const cameraDesc = cameraCutoutDesc || (brand === 'apple' ? 'square triple-lens plateau' : 'vertical floating lens array');
-    const dimensionInfo = dimensions ? `${dimensions.pixelWidth}x${dimensions.pixelHeight}px (${dimensions.mmWidth}mm x ${dimensions.mmHeight}mm)` : 'standard printify template dimensions';
-
-    const systemInstructions = `[CRITICAL PRODUCT & ARTWORK PRESERVATION INSTRUCTIONS]:
-You are a master commercial lifestyle product photographer executing a campaign for Printify Tough Phone Cases.
-You are given the user's EXACT uploaded artwork (Image 1) and the physical phone case reference mockup (Image 2).
-
-PRIMARY MANDATES:
-1. PRESERVE THE USER'S ARTWORK EXACTLY:
-   - Do NOT redesign, regenerate, alter, re-color, add elements to, or replace the artwork.
-   - The artwork on the back of the case must be an exact, sharp, full-bleed print reproduction of the provided design.
-2. PRESERVE THE PHYSICAL PHONE CASE GEOMETRY:
-   - Device: ${modelName} (${brand.toUpperCase()}).
-   - Case Type: ${caseType} (dual-layer shockproof bumper, raised camera bevel, rounded edges, authentic dimensions: ${dimensionInfo}).
-   - Camera module cutout: ${cameraDesc}.
-   - The phone MUST maintain authentic ${brand === 'apple' ? 'iPhone' : 'Samsung'} proportions and cutouts.
-3. THE BACK OF THE PHONE MUST BE PROMINENTLY VISIBLE:
-   - The phone must be positioned naturally in the person's hand, facing the camera so the back case art is clearly visible, sharp, and recognizable.
-   - Realistic hand anatomy: natural grip around the sides, authentic thumb/finger placement on the perimeter bumper without obscuring the artwork.
-4. LIFESTYLE ENVIRONMENT & CONTEXT:
-   - Scene: "${userScenePrompt || 'A person talking with a friend while casually holding their phone, with the back of the phone case facing the camera.'}"
-   - Style: Professional 35mm f/2.0 commercial lifestyle photography, cinematic natural lighting, realistic contact shadows, subtle reflections on the glossy/matte case surface, photorealistic depth of field.
-   - Variation: #${variationIndex}. Ensure unique natural pose and lighting nuance.
-
-OUTPUT: A single photorealistic photograph.`;
-
-    parts.push({ text: systemInstructions });
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite-image',
-      contents: {
-        parts,
-      },
-      config: {
-        imageConfig: {
-          aspectRatio: '4:3',
-        },
-      },
-    });
-
-    let imageUrl: string | null = null;
-    if (response.candidates?.[0]?.content?.parts) {
-      for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) {
-          imageUrl = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
-          break;
-        }
-      }
-    }
-
-    if (!imageUrl) {
-      return res.status(500).json({ error: 'Failed to generate lifestyle scene' });
-    }
-
-    return res.json({ imageUrl });
-  } catch (error: any) {
-    console.error('Error generating lifestyle scene:', error);
-    const msg = error?.message || 'Failed to generate lifestyle scene';
-    let userMsg = msg;
-    if (msg.includes('401') || msg.includes('UNAUTHENTICATED') || msg.includes('authentication credential')) {
-      userMsg = 'Invalid authentication credentials. Please select or verify your API key in the AI Studio Secrets panel.';
-    }
-    return res.status(500).json({
-      error: userMsg,
-    });
-  }
-});
-
-app.post('/api/generate-case-mockup', async (req, res) => {
-  try {
-    const { designDescription, designImageUrl, device = 'iphone-16-pro', caseType = 'slim' } = req.body;
-    if (!designDescription && !designImageUrl) {
-      return res.status(400).json({ error: 'Design description or image is required' });
-    }
-
-    const ai = getGeminiClient();
-    if (!ai) {
-      return res.status(503).json({
-        error: 'Gemini API key is not configured.',
-      });
-    }
-
-    const parts: any[] = [];
-
-    // If design image provided, pass as inline image part for in-context rendering
-    if (designImageUrl) {
-      let base64Data = '';
-      let mimeType = 'image/png';
-
-      if (designImageUrl.startsWith('data:')) {
-        const match = designImageUrl.match(/^data:([^;]+);base64,(.+)$/);
-        if (match) {
-          mimeType = match[1];
-          base64Data = match[2];
-        }
-      } else if (designImageUrl.startsWith('/')) {
-        try {
-          const fs = await import('fs');
-          const localPath = path.join(__dirname, designImageUrl);
-          if (fs.existsSync(localPath)) {
-            const buf = fs.readFileSync(localPath);
-            base64Data = buf.toString('base64');
-            mimeType = designImageUrl.endsWith('.png') ? 'image/png' : 'image/jpeg';
-          }
-        } catch (e) {
-          console.error('Error reading local artwork file:', e);
-        }
-      }
-
-      if (base64Data) {
-        parts.push({
-          inlineData: {
-            mimeType,
-            data: base64Data,
-          },
-        });
-      }
-    }
-
-    const isIphone = device.toLowerCase().includes('iphone');
-    const deviceName = isIphone ? 'Apple iPhone 16 Pro' : 'Samsung Galaxy S25 Ultra';
-    const cameraDesc = isIphone
-      ? 'square rounded camera plateau with triple triangular lenses in top-left'
-      : 'floating vertical column of circular camera lenses in top-left';
-
-    const promptText = `A crisp, photorealistic commercial product photograph of a modern ${deviceName} phone case (${caseType} edition) standing centered upright against a seamless studio cyclorama backdrop.
-The back surface of the phone case has the exact provided artwork seamlessly printed across it with crisp edge-to-edge full bleed wrap.
-Accurately render the ${deviceName} physical geometry: ${cameraDesc}, precise case rounded corners, tactile side buttons, natural surface curvature, soft studio floor contact drop shadow, subtle specular gloss highlights along the perimeter bevel.
-Clean e-commerce product catalog shot. No hands, no people, no lifestyle background clutter.`;
-
-    parts.push({ text: promptText });
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite-image',
-      contents: {
-        parts,
-      },
-      config: {
-        imageConfig: {
-          aspectRatio: '1:1',
-        },
-      },
-    });
-
-    let imageUrl: string | null = null;
-    if (response.candidates?.[0]?.content?.parts) {
-      for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) {
-          imageUrl = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
-          break;
-        }
-      }
-    }
-
-    if (!imageUrl) {
-      return res.status(500).json({ error: 'Failed to generate case mockup' });
-    }
-
-    return res.json({ imageUrl });
-  } catch (error: any) {
-    console.error('Error generating case mockup:', error);
-    const msg = error?.message || 'Failed to generate case mockup';
-    let userMsg = msg;
-    if (msg.includes('401') || msg.includes('UNAUTHENTICATED') || msg.includes('authentication credential')) {
-      userMsg = 'Invalid authentication credentials. Please select or verify your API key in the AI Studio Secrets panel.';
-    }
-    return res.status(500).json({
-      error: userMsg,
-    });
-  }
-});
-
-// API: AI Placeholder Value Suggestions
+// API: Placeholder Value Suggestions using Pollinations Text/Chat API
 app.post('/api/suggest-values', async (req, res) => {
   try {
     const { placeholder, niche, currentPrompt } = req.body;
-    const ai = getGeminiClient();
-    if (!ai) {
-      return res.json({ suggestions: [] });
+    const apiKey = getPollinationsKey();
+
+    if (apiKey) {
+      try {
+        const promptContent = `You are a creative director for graphic illustration and print artwork.
+For the placeholder tag "${placeholder}" in the niche "${niche}" (context: "${currentPrompt || ''}"):
+Provide 6 vivid, creative, unique options to fill this placeholder.
+Return ONLY a valid JSON array of 6 short strings, for example: ["option 1", "option 2", "option 3", "option 4", "option 5", "option 6"]. Do not include any other markdown or commentary.`;
+
+        const chatResponse = await fetch('https://gen.pollinations.ai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: 'openai',
+            messages: [{ role: 'user', content: promptContent }],
+            temperature: 0.8,
+          }),
+        });
+
+        if (chatResponse.ok) {
+          const chatData = await chatResponse.json();
+          let rawContent = chatData.choices?.[0]?.message?.content || '';
+
+          // Strip markdown code fences if present
+          rawContent = rawContent.replace(/```json\s*/gi, '').replace(/```\s*$/gi, '').trim();
+
+          const parsed = JSON.parse(rawContent);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const cleanSuggestions = parsed
+              .map((item) => (typeof item === 'string' ? item : item.idea || item.title || JSON.stringify(item)))
+              .filter(Boolean);
+            if (cleanSuggestions.length > 0) {
+              return res.json({ suggestions: cleanSuggestions });
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[Pollinations API] Chat suggestions fallback triggered:', err);
+      }
     }
 
-    const prompt = `You are a master creative director for phone case graphic design.
-Given the placeholder tag "${placeholder}" for niche "${niche}" within prompt context:
-"${currentPrompt}"
-
-Provide 6 creative, evocative, visually vivid options to fill this placeholder.
-Return ONLY a JSON array of 6 short strings (e.g. ["option 1", "option 2", ...]).`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-      },
-    });
-
-    let suggestions: string[] = [];
-    try {
-      suggestions = JSON.parse(response.text || '[]');
-    } catch {
-      suggestions = [];
-    }
+    // Default curated fallback if API call fails
+    const key = (placeholder || '').toUpperCase().trim();
+    const suggestions = FALLBACK_SUGGESTIONS[key] || [
+      `radiant ${placeholder} infused with celestial energy`,
+      `intricate dynamic ${placeholder} with fine details`,
+      `ethereal glowing ${placeholder} in motion`,
+      `stylized minimalist ${placeholder} with bold lines`,
+      `ornate vintage ${placeholder} with gilded accents`,
+      `cybernetic high-tech ${placeholder} with neon pulses`,
+    ];
 
     return res.json({ suggestions });
   } catch (error: any) {
@@ -400,7 +232,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server listening on port ${PORT}`);
+    console.log(`Design Studio server listening on port ${PORT} with Pollinations API`);
   });
 }
 

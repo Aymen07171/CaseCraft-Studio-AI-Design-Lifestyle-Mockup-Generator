@@ -7,28 +7,36 @@ import {
   Plus,
   Trash2,
   Wand2,
-  ArrowRight,
   RefreshCw,
   Lightbulb,
   Code2,
   Layers,
-  Palette,
-  Eye,
+  Download,
+  Maximize2,
+  X,
+  Sliders,
+  History,
+  Info,
+  ExternalLink,
 } from 'lucide-react';
-import { NichePreset, PlaceholderField, GeneratedDesign } from '../types';
+import { NichePreset, PlaceholderField, GeneratedDesign, AspectRatio } from '../types';
 import { NICHE_PRESETS } from '../data/presets';
-import { PhoneCaseRenderer } from './PhoneCaseRenderer';
 
-interface PromptBuilderProps {
-  onDesignGenerated: (design: GeneratedDesign) => void;
+interface DesignStudioProps {
   activeDesign: GeneratedDesign | null;
-  onNavigateToMockups: () => void;
+  designs: GeneratedDesign[];
+  onSelectDesign: (design: GeneratedDesign) => void;
+  onDeleteDesign: (id: string) => void;
+  onDesignGenerated: (design: GeneratedDesign) => void;
+  resetTrigger?: number;
 }
 
-export const PromptBuilder: React.FC<PromptBuilderProps> = ({
-  onDesignGenerated,
+export const DesignStudio: React.FC<DesignStudioProps> = ({
   activeDesign,
-  onNavigateToMockups,
+  designs,
+  onSelectDesign,
+  onDeleteDesign,
+  onDesignGenerated,
 }) => {
   const [selectedNicheId, setSelectedNicheId] = useState<string>(NICHE_PRESETS[0].id);
   const currentPreset: NichePreset =
@@ -38,6 +46,13 @@ export const PromptBuilder: React.FC<PromptBuilderProps> = ({
   const [placeholders, setPlaceholders] = useState<PlaceholderField[]>(
     currentPreset.defaultPlaceholders
   );
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>(
+    currentPreset.defaultAspectRatio || '9:16'
+  );
+  const [model, setModel] = useState<string>('flux');
+  const [customSeed, setCustomSeed] = useState<string>('');
+  const [useRandomSeed, setUseRandomSeed] = useState<boolean>(true);
+
   const [showTemplateEditor, setShowTemplateEditor] = useState<boolean>(false);
   const [copiedPrompt, setCopiedPrompt] = useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
@@ -50,6 +65,9 @@ export const PromptBuilder: React.FC<PromptBuilderProps> = ({
 
   // AI suggestions loading states per tag
   const [suggestingTag, setSuggestingTag] = useState<string | null>(null);
+
+  // Lightbox Modal
+  const [lightboxOpen, setLightboxOpen] = useState<boolean>(false);
 
   // Assemble dynamic prompt by replacing {{TAG}} with corresponding placeholder value
   const assemblePrompt = (): string => {
@@ -70,6 +88,9 @@ export const PromptBuilder: React.FC<PromptBuilderProps> = ({
     setSelectedNicheId(nicheId);
     setTemplate(niche.template);
     setPlaceholders(niche.defaultPlaceholders);
+    if (niche.defaultAspectRatio) {
+      setAspectRatio(niche.defaultAspectRatio);
+    }
     setGenerationError(null);
   };
 
@@ -114,6 +135,7 @@ export const PromptBuilder: React.FC<PromptBuilderProps> = ({
   const handleResetDefaults = () => {
     setTemplate(currentPreset.template);
     setPlaceholders(currentPreset.defaultPlaceholders);
+    setAspectRatio(currentPreset.defaultAspectRatio || '9:16');
   };
 
   // Copy Assembled Prompt to Clipboard
@@ -192,10 +214,19 @@ export const PromptBuilder: React.FC<PromptBuilderProps> = ({
     }
   };
 
-  // Trigger Design Generation
-  const handleGenerateDesign = async () => {
+  // Trigger Design Generation via Free Pollinations.ai
+  const handleGenerateDesign = async (overrideSeed?: number) => {
     setIsGenerating(true);
     setGenerationError(null);
+
+    const chosenSeed =
+      overrideSeed !== undefined
+        ? overrideSeed
+        : useRandomSeed
+        ? Math.floor(Math.random() * 1000000000)
+        : customSeed.trim()
+        ? parseInt(customSeed, 10)
+        : Math.floor(Math.random() * 1000000000);
 
     try {
       const response = await fetch('/api/generate-design', {
@@ -203,40 +234,43 @@ export const PromptBuilder: React.FC<PromptBuilderProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: dynamicPrompt,
-          aspectRatio: '9:16',
+          aspectRatio,
+          seed: chosenSeed,
+          model,
         }),
       });
 
       const data = await response.json();
 
       if (!response.ok || !data.imageUrl) {
-        throw new Error(data.error || 'Failed to generate design');
+        throw new Error(data.error || 'Failed to generate design with Pollinations.ai');
       }
 
       const newDesign: GeneratedDesign = {
         id: `design-${Date.now()}`,
-        title: `${currentPreset.name} Artwork`,
+        title: `${currentPreset.name} Art`,
         prompt: dynamicPrompt,
         imageUrl: data.imageUrl,
+        sourceUrl: data.sourceUrl,
         niche: currentPreset.name,
         createdAt: Date.now(),
         placeholders: placeholders.reduce((acc, p) => ({ ...acc, [p.tag]: p.value }), {}),
+        seed: data.seed ?? chosenSeed,
+        aspectRatio,
+        width: data.width,
+        height: data.height,
       };
 
       onDesignGenerated(newDesign);
     } catch (err: any) {
-      console.error('Generation failed:', err);
-      let errMsg = err.message || 'Image generation failed.';
-      if (errMsg.includes('401') || errMsg.includes('UNAUTHENTICATED') || errMsg.includes('credentials') || errMsg.includes('API key')) {
-        errMsg = 'Authentication error: Please ensure a valid Gemini API key is selected in the AI Studio Secrets panel, or use the pre-rendered high-res preset artwork below.';
-      }
-      setGenerationError(errMsg);
+      console.error('Pollinations generation failed:', err);
+      setGenerationError(err.message || 'Image generation failed with Pollinations.ai');
     } finally {
       setIsGenerating(false);
     }
   };
 
-  // Quick Apply Pre-rendered Sample (Zero-latency instant preview)
+  // Load Preset Sample Artwork
   const handleApplyPresetSample = () => {
     if (currentPreset.sampleImage) {
       const presetDesign: GeneratedDesign = {
@@ -248,9 +282,20 @@ export const PromptBuilder: React.FC<PromptBuilderProps> = ({
         createdAt: Date.now(),
         placeholders: placeholders.reduce((acc, p) => ({ ...acc, [p.tag]: p.value }), {}),
         isPreset: true,
+        aspectRatio: '9:16',
       };
       onDesignGenerated(presetDesign);
     }
+  };
+
+  // Helper download function
+  const handleDownloadImage = (design: GeneratedDesign) => {
+    const link = document.createElement('a');
+    link.href = design.imageUrl;
+    link.download = `${design.title.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${Date.now()}.jpg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
@@ -263,14 +308,14 @@ export const PromptBuilder: React.FC<PromptBuilderProps> = ({
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="text-xs font-semibold uppercase tracking-wider text-indigo-400">
-                Step 1: Choose Niche & Assemble Placeholders
+                Design Studio • Interactive Prompt Engineering
               </span>
             </div>
             <h1 className="text-2xl font-bold text-white tracking-tight">
-              Design Prompt Customization Studio
+              AI Artwork & Graphic Design Studio
             </h1>
             <p className="text-sm text-slate-400 mt-1 max-w-2xl">
-              Select a niche to auto-load customizable placeholders (e.g.{' '}
+              Choose a creative art style, customize prompt placeholders (e.g.{' '}
               <code className="text-indigo-300 bg-indigo-950/60 px-1 py-0.5 rounded text-xs">
                 &#123;&#123;SUBJECT_POSE&#125;&#125;
               </code>
@@ -280,13 +325,9 @@ export const PromptBuilder: React.FC<PromptBuilderProps> = ({
               </code>
               ,{' '}
               <code className="text-indigo-300 bg-indigo-950/60 px-1 py-0.5 rounded text-xs">
-                &#123;&#123;COMPANION&#125;&#125;
+                &#123;&#123;COLOR_PALETTE&#125;&#125;
               </code>
-              ,{' '}
-              <code className="text-indigo-300 bg-indigo-950/60 px-1 py-0.5 rounded text-xs">
-                (vitrail)
-              </code>
-              ), swap options freely, or add your own tags.
+              ), and generate high-resolution illustrations for free with Pollinations.ai.
             </p>
           </div>
 
@@ -311,16 +352,19 @@ export const PromptBuilder: React.FC<PromptBuilderProps> = ({
         </div>
 
         {/* Niche Preset Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {NICHE_PRESETS.map((niche) => {
             const isSelected = niche.id === selectedNicheId;
+            const isRef = niche.badge.includes('Reference');
             return (
               <button
                 key={niche.id}
                 onClick={() => handleSelectNiche(niche.id)}
                 className={`text-left p-3.5 rounded-xl transition-all border relative cursor-pointer ${
                   isSelected
-                    ? 'bg-indigo-950/50 border-indigo-500/80 shadow-lg shadow-indigo-950/50 ring-1 ring-indigo-500/40'
+                    ? 'bg-indigo-950/60 border-indigo-500 shadow-lg shadow-indigo-950/50 ring-1 ring-indigo-500/40'
+                    : isRef
+                    ? 'bg-slate-950/70 border-indigo-950/60 hover:bg-slate-800/40 hover:border-indigo-800/50 text-slate-300'
                     : 'bg-slate-950/40 border-slate-800/80 hover:bg-slate-800/40 hover:border-slate-700 text-slate-300'
                 }`}
               >
@@ -329,6 +373,8 @@ export const PromptBuilder: React.FC<PromptBuilderProps> = ({
                     className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${
                       isSelected
                         ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                        : isRef
+                        ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
                         : 'bg-slate-800 text-slate-400'
                     }`}
                   >
@@ -344,9 +390,26 @@ export const PromptBuilder: React.FC<PromptBuilderProps> = ({
             );
           })}
         </div>
+
+        {/* Reference Alignment Explainer Bar */}
+        {currentPreset.referenceNotes && (
+          <div className="mt-4 p-3.5 rounded-xl bg-indigo-950/40 border border-indigo-800/50 flex items-start gap-3">
+            <div className="p-1 rounded-lg bg-indigo-900/60 text-indigo-300 mt-0.5 shrink-0">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div className="text-xs">
+              <span className="font-semibold text-indigo-200 uppercase tracking-wider text-[11px] block mb-0.5">
+                Target Reference Alignment:
+              </span>
+              <p className="text-slate-300 leading-relaxed">
+                {currentPreset.referenceNotes}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Main Builder Grid */}
+      {/* Main Studio Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Left Column: Placeholders Configuration (7 cols) */}
         <div className="lg:col-span-7 space-y-6">
@@ -358,7 +421,7 @@ export const PromptBuilder: React.FC<PromptBuilderProps> = ({
                   Placeholders for {currentPreset.name}
                 </h2>
                 <span className="text-xs text-slate-500 font-mono">
-                  ({placeholders.length} active tags)
+                  ({placeholders.length} tags)
                 </span>
               </div>
 
@@ -478,7 +541,7 @@ export const PromptBuilder: React.FC<PromptBuilderProps> = ({
                           onClick={() => handleGetAiSuggestions(placeholder.tag)}
                           disabled={isSuggesting}
                           className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border border-amber-500/20 transition cursor-pointer"
-                          title="Generate fresh AI ideas with Gemini"
+                          title="Generate fresh creative ideas"
                         >
                           <Lightbulb className="w-3 h-3" />
                           <span>{isSuggesting ? 'Thinking...' : 'AI Ideas'}</span>
@@ -549,9 +612,9 @@ export const PromptBuilder: React.FC<PromptBuilderProps> = ({
           </div>
         </div>
 
-        {/* Right Column: Live Prompt Assembly & Generate Action (5 cols) */}
+        {/* Right Column: Live Prompt Assembly & Generation Settings (5 cols) */}
         <div className="lg:col-span-5 space-y-6">
-          {/* Assembled Prompt Card */}
+          {/* Assembled Prompt & Generation Control Card */}
           <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
@@ -578,120 +641,281 @@ export const PromptBuilder: React.FC<PromptBuilderProps> = ({
 
             {/* Assembled Prompt Text Box */}
             <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 leading-relaxed font-mono relative">
-              <div className="max-h-48 overflow-y-auto pr-1">
+              <div className="max-h-40 overflow-y-auto pr-1">
                 {dynamicPrompt}
               </div>
               <div className="mt-3 pt-2 border-t border-slate-800/60 flex items-center justify-between text-[11px] text-slate-500">
-                <span>Aspect: 9:16 (Phone Case Backplate)</span>
+                <span>Aspect: {aspectRatio}</span>
                 <span>{dynamicPrompt.length} characters</span>
               </div>
             </div>
 
-            {/* Error Message if any with Instant Fallback Button */}
+            {/* Generation Parameters: Aspect Ratio & Seed */}
+            <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5 text-indigo-400" />
+                  Generation Settings
+                </span>
+                <span className="text-[11px] text-emerald-400 font-medium">Pollinations API (Active)</span>
+              </div>
+
+              {/* Aspect Ratio Buttons */}
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1.5">
+                  Aspect Ratio Canvas:
+                </label>
+                <div className="grid grid-cols-5 gap-1.5">
+                  {(['9:16', '1:1', '3:4', '4:3', '16:9'] as AspectRatio[]).map((ratio) => (
+                    <button
+                      key={ratio}
+                      type="button"
+                      onClick={() => setAspectRatio(ratio)}
+                      className={`text-xs py-1.5 px-1 text-center rounded-lg border font-mono transition cursor-pointer ${
+                        aspectRatio === ratio
+                          ? 'bg-indigo-600 text-white border-indigo-500 font-semibold'
+                          : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                      }`}
+                    >
+                      {ratio}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Seed Control */}
+              <div className="pt-1 flex items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="randomSeedCheck"
+                    checked={useRandomSeed}
+                    onChange={(e) => setUseRandomSeed(e.target.checked)}
+                    className="rounded border-slate-700 text-indigo-600 focus:ring-0 bg-slate-900 cursor-pointer"
+                  />
+                  <label htmlFor="randomSeedCheck" className="text-slate-300 cursor-pointer">
+                    Random Seed
+                  </label>
+                </div>
+
+                {!useRandomSeed && (
+                  <input
+                    type="number"
+                    placeholder="Enter seed #"
+                    value={customSeed}
+                    onChange={(e) => setCustomSeed(e.target.value)}
+                    className="w-32 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white"
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Error Message if any */}
             {generationError && (
               <div className="p-3.5 rounded-xl bg-rose-950/40 border border-rose-800 text-xs text-rose-300 space-y-2">
-                <p className="font-semibold text-rose-200">API Notice</p>
+                <p className="font-semibold text-rose-200">Notice</p>
                 <p>{generationError}</p>
-                <div className="pt-1">
-                  <button
-                    onClick={handleApplyPresetSample}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition cursor-pointer"
-                  >
-                    <span>Load 2D Preset Artwork & Proceed to Mockups</span>
-                  </button>
-                </div>
+                {currentPreset.sampleImage && (
+                  <div className="pt-1">
+                    <button
+                      onClick={handleApplyPresetSample}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition cursor-pointer"
+                    >
+                      <span>Load Preset Sample Artwork</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Main Generate Button */}
+            {/* Main Generate Button with Pollinations API */}
             <button
-              onClick={handleGenerateDesign}
+              onClick={() => handleGenerateDesign()}
               disabled={isGenerating}
               className={`w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl text-sm font-semibold transition-all shadow-lg cursor-pointer ${
                 isGenerating
                   ? 'bg-indigo-800 text-indigo-200 cursor-wait'
-                  : 'bg-gradient-to-r from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white shadow-indigo-600/30'
+                  : 'bg-gradient-to-r from-indigo-600 via-violet-600 to-indigo-500 hover:from-indigo-500 hover:to-violet-500 text-white shadow-indigo-600/30'
               }`}
             >
               {isGenerating ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Synthesizing Design with Gemini...</span>
+                  <span>Synthesizing with Pollinations API...</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="w-4 h-4" />
-                  <span>Generate Design Artwork</span>
+                  <span>Generate Artwork with Pollinations API</span>
                 </>
               )}
             </button>
 
             {/* Instant Sample Preview Helper */}
             {currentPreset.sampleImage && (
-              <div className="pt-2 text-center">
+              <div className="pt-1 text-center">
                 <button
                   onClick={handleApplyPresetSample}
                   className="text-xs text-indigo-400 hover:text-indigo-300 underline underline-offset-4 cursor-pointer"
                 >
-                  ⚡ Instant Load High-Res Preset Artwork
+                  ⚡ Instant Load Sample Preset Artwork
                 </button>
               </div>
             )}
           </div>
 
-          {/* Active Design Preview: Pure 2D Flat-Lay Print Canvas (No Phone Mockup) */}
+          {/* Active Design Canvas Showcase */}
           {activeDesign && (
             <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-slate-800">
                 <div>
                   <h3 className="text-sm font-semibold text-white flex items-center gap-1.5">
                     <Check className="w-4 h-4 text-emerald-400" />
-                    2D Art Canvas Print
+                    Artwork Canvas
                   </h3>
                   <p className="text-xs text-slate-400 mt-0.5">{activeDesign.title}</p>
                 </div>
-                <button
-                  onClick={onNavigateToMockups}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-900/30 cursor-pointer"
-                >
-                  <span>Generate Phone Mockups</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setLightboxOpen(true)}
+                    className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition cursor-pointer"
+                    title="View fullscreen"
+                  >
+                    <Maximize2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDownloadImage(activeDesign)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-900/30 transition cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download</span>
+                  </button>
+                </div>
               </div>
 
-              {/* Pure 2D Rectangular Art Canvas Display - NO PHONE / NO MOCKUP */}
+              {/* Artwork Container */}
               <div className="flex flex-col items-center justify-center p-4 bg-slate-950/80 rounded-xl border border-slate-800/80">
-                <div className="relative aspect-[9/16] w-full max-w-[260px] rounded-lg overflow-hidden shadow-2xl border-2 border-slate-700/60 bg-black group">
+                <div className="relative w-full max-w-[320px] rounded-xl overflow-hidden shadow-2xl border border-slate-700/60 bg-black group">
                   <img
                     src={activeDesign.imageUrl}
                     alt={activeDesign.title}
                     referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover select-none"
+                    className="w-full h-auto object-cover select-none"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3">
-                    <a
-                      href={activeDesign.imageUrl}
-                      download={`${activeDesign.title}-2d-print.png`}
-                      className="w-full py-1.5 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium text-center shadow-md transition"
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4 gap-2">
+                    <button
+                      onClick={() => handleDownloadImage(activeDesign)}
+                      className="w-full py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-lg transition"
                     >
-                      Download Pure 2D Print (9:16)
-                    </a>
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download Full Quality</span>
+                    </button>
+                    <button
+                      onClick={() => handleGenerateDesign(Math.floor(Math.random() * 1000000000))}
+                      className="w-full py-1.5 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center justify-center gap-1.5 transition"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Re-roll (New Seed)</span>
+                    </button>
                   </div>
                 </div>
 
-                <div className="mt-3 text-center">
-                  <span className="text-[11px] font-medium text-indigo-300 bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-800/40">
-                    Pure 2D Flat-Lay Graphic • 9:16 Rectangular Canvas
-                  </span>
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Isolated artwork without device or shadows — ready for mockup application.
-                  </p>
+                {/* Details Footer */}
+                <div className="mt-3 w-full flex items-center justify-between text-[11px] text-slate-400 px-1">
+                  <span>Aspect: {activeDesign.aspectRatio || '9:16'}</span>
+                  {activeDesign.seed && <span>Seed: {activeDesign.seed}</span>}
+                  <span className="text-emerald-400 font-medium">Free AI</span>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Session Design History */}
+          {designs.length > 1 && (
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <History className="w-3.5 h-3.5 text-indigo-400" />
+                  Session History ({designs.length})
+                </h4>
+                <span className="text-[11px] text-slate-500">Click to switch</span>
+              </div>
+              <div className="grid grid-cols-4 gap-2.5 max-h-48 overflow-y-auto pr-1">
+                {designs.map((design) => {
+                  const isActive = activeDesign?.id === design.id;
+                  return (
+                    <div
+                      key={design.id}
+                      className={`group relative rounded-lg overflow-hidden border cursor-pointer aspect-[9/16] bg-slate-950 ${
+                        isActive
+                          ? 'border-indigo-500 ring-2 ring-indigo-500/50'
+                          : 'border-slate-800 hover:border-slate-700 opacity-80 hover:opacity-100'
+                      }`}
+                      onClick={() => onSelectDesign(design)}
+                    >
+                      <img
+                        src={design.imageUrl}
+                        alt={design.title}
+                        className="w-full h-full object-cover select-none"
+                      />
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteDesign(design.id);
+                        }}
+                        className="absolute top-1 right-1 p-1 rounded bg-black/70 text-slate-400 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition"
+                        title="Delete design"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
         </div>
       </div>
+
+      {/* Lightbox Modal */}
+      {lightboxOpen && activeDesign && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in"
+          onClick={() => setLightboxOpen(false)}
+        >
+          <div
+            className="relative max-w-4xl max-h-[90vh] flex flex-col items-center bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-full flex items-center justify-between pb-3 mb-2 border-b border-slate-800">
+              <h3 className="font-semibold text-white text-sm">{activeDesign.title}</h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleDownloadImage(activeDesign)}
+                  className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download</span>
+                </button>
+                <button
+                  onClick={() => setLightboxOpen(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-auto max-h-[75vh] rounded-lg">
+              <img
+                src={activeDesign.imageUrl}
+                alt={activeDesign.title}
+                className="max-h-[75vh] w-auto object-contain rounded-lg"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
