@@ -1,5 +1,5 @@
 import React from 'react';
-import { Download, RefreshCw, Palette } from 'lucide-react';
+import { Download, RefreshCw, Palette, ShoppingBag } from 'lucide-react';
 
 interface HeaderProps {
   onReset: () => void;
@@ -66,6 +66,20 @@ export const Header: React.FC<HeaderProps> = ({
               <RefreshCw className="w-3.5 h-3.5 text-slate-400" />
               <span className="hidden sm:inline">Reset Defaults</span>
             </button>
+
+            {hasArtwork && (
+              <button
+                onClick={() => {
+                  const el = document.getElementById('etsy-listing-section');
+                  el?.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white shadow-md shadow-amber-950/30 transition cursor-pointer"
+                title="Jump to Etsy SEO Listing Generator"
+              >
+                <ShoppingBag className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Etsy Listing</span>
+              </button>
+            )}
 
             {hasArtwork && onDownloadCurrent && (
               <button

@@ -18,9 +18,11 @@ import {
   History,
   Info,
   ExternalLink,
+  ShoppingBag,
 } from 'lucide-react';
 import { NichePreset, PlaceholderField, GeneratedDesign, AspectRatio } from '../types';
 import { NICHE_PRESETS } from '../data/presets';
+import { EtsyListingGenerator } from './EtsyListingGenerator';
 
 interface DesignStudioProps {
   activeDesign: GeneratedDesign | null;
@@ -355,16 +357,13 @@ export const DesignStudio: React.FC<DesignStudioProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {NICHE_PRESETS.map((niche) => {
             const isSelected = niche.id === selectedNicheId;
-            const isRef = niche.badge.includes('Reference');
             return (
               <button
                 key={niche.id}
                 onClick={() => handleSelectNiche(niche.id)}
                 className={`text-left p-3.5 rounded-xl transition-all border relative cursor-pointer ${
                   isSelected
-                    ? 'bg-indigo-950/60 border-indigo-500 shadow-lg shadow-indigo-950/50 ring-1 ring-indigo-500/40'
-                    : isRef
-                    ? 'bg-slate-950/70 border-indigo-950/60 hover:bg-slate-800/40 hover:border-indigo-800/50 text-slate-300'
+                    ? 'bg-indigo-950/50 border-indigo-500/80 shadow-lg shadow-indigo-950/50 ring-1 ring-indigo-500/40'
                     : 'bg-slate-950/40 border-slate-800/80 hover:bg-slate-800/40 hover:border-slate-700 text-slate-300'
                 }`}
               >
@@ -373,8 +372,6 @@ export const DesignStudio: React.FC<DesignStudioProps> = ({
                     className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${
                       isSelected
                         ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                        : isRef
-                        ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
                         : 'bg-slate-800 text-slate-400'
                     }`}
                   >
@@ -390,23 +387,6 @@ export const DesignStudio: React.FC<DesignStudioProps> = ({
             );
           })}
         </div>
-
-        {/* Reference Alignment Explainer Bar */}
-        {currentPreset.referenceNotes && (
-          <div className="mt-4 p-3.5 rounded-xl bg-indigo-950/40 border border-indigo-800/50 flex items-start gap-3">
-            <div className="p-1 rounded-lg bg-indigo-900/60 text-indigo-300 mt-0.5 shrink-0">
-              <Sparkles className="w-4 h-4" />
-            </div>
-            <div className="text-xs">
-              <span className="font-semibold text-indigo-200 uppercase tracking-wider text-[11px] block mb-0.5">
-                Target Reference Alignment:
-              </span>
-              <p className="text-slate-300 leading-relaxed">
-                {currentPreset.referenceNotes}
-              </p>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Main Studio Grid */}
@@ -777,6 +757,17 @@ export const DesignStudio: React.FC<DesignStudioProps> = ({
                 </div>
                 <div className="flex items-center gap-1.5">
                   <button
+                    onClick={() => {
+                      const el = document.getElementById('etsy-listing-section');
+                      el?.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white text-xs font-semibold shadow-md shadow-amber-950/30 transition cursor-pointer"
+                    title="Generate or view complete Etsy Listing"
+                  >
+                    <ShoppingBag className="w-3.5 h-3.5" />
+                    <span>{activeDesign.etsyListing ? 'Etsy Listing' : 'Etsy SEO'}</span>
+                  </button>
+                  <button
                     onClick={() => setLightboxOpen(true)}
                     className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition cursor-pointer"
                     title="View fullscreen"
@@ -819,6 +810,22 @@ export const DesignStudio: React.FC<DesignStudioProps> = ({
                     </button>
                   </div>
                 </div>
+
+                {/* Direct Action: Generate / View Etsy Listing */}
+                <button
+                  onClick={() => {
+                    const el = document.getElementById('etsy-listing-section');
+                    el?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  className="w-full max-w-[320px] mt-3 py-2 px-3 rounded-lg bg-gradient-to-r from-amber-600/90 to-orange-600/90 hover:from-amber-500 hover:to-orange-500 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-md transition cursor-pointer"
+                >
+                  <ShoppingBag className="w-3.5 h-3.5" />
+                  <span>
+                    {activeDesign.etsyListing
+                      ? 'View Generated Etsy Listing & Tags'
+                      : 'Generate Complete Etsy Product Listing'}
+                  </span>
+                </button>
 
                 {/* Details Footer */}
                 <div className="mt-3 w-full flex items-center justify-between text-[11px] text-slate-400 px-1">
@@ -876,6 +883,21 @@ export const DesignStudio: React.FC<DesignStudioProps> = ({
           )}
         </div>
       </div>
+
+      {/* Etsy Product Listing Generator Full-Width Module */}
+      {activeDesign && (
+        <div id="etsy-listing-section" className="scroll-mt-20">
+          <EtsyListingGenerator
+            activeDesign={activeDesign}
+            onUpdateDesignListing={(newListing) => {
+              onDesignGenerated({
+                ...activeDesign,
+                etsyListing: newListing,
+              });
+            }}
+          />
+        </div>
+      )}
 
       {/* Lightbox Modal */}
       {lightboxOpen && activeDesign && (

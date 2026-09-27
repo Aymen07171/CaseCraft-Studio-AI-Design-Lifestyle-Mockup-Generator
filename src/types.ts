@@ -17,8 +17,6 @@ export interface NichePreset {
   defaultPlaceholders: PlaceholderField[];
   sampleImage?: string;
   defaultAspectRatio?: AspectRatio;
-  referenceNotes?: string;
-  styleTag?: string;
 }
 
 export interface GeneratedDesign {
@@ -35,4 +33,19 @@ export interface GeneratedDesign {
   aspectRatio?: AspectRatio;
   width?: number;
   height?: number;
+  etsyListing?: EtsyListing;
+}
+
+export interface EtsyListing {
+  title: string;
+  description: string;
+  primaryKeywords: string[];
+  longTailKeywords: string[];
+  etsyTags: string[];
+  targetCustomer: string[];
+  designStyle: string[];
+  searchIntent: string;
+  keywordRationale: string;
+  formattedOutput: string;
+  createdAt: number;
 }

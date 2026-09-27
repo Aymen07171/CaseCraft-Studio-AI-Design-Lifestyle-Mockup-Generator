@@ -5,40 +5,40 @@ import { GeneratedDesign } from './types';
 
 const INITIAL_VITRAIL_DESIGN: GeneratedDesign = {
   id: 'preset-sample-vitrail-01',
-  title: 'Woodland Fox & Sunburst (Stained Glass)',
-  prompt: `Masterpiece authentic cathedral stained glass window (vitrail), symmetrical arched vertical composition.
+  title: 'Kitsune Samurai (Stained Glass)',
+  prompt: `A breathtaking 2D anime illustration of celestial fox spirit samurai dual-wielding glowing katanas in a dynamic mid-air leap
 
-In the center, a peaceful sleeping red fox curled in a tight circle with fluffy tail wrapped around its body.
+surrounded by cherry blossoms and weeping wisteria branches, and a spirit fox with nine flame tails.
 
-Directly behind the subject is a radiant segmented sunburst halo with glowing amber and golden glass rays, with a golden crescent moon and twinkling stars in the upper arch.
+The entire composition is designed in an intricate, vibrant stained glass
+(vitrail) mosaic style.
 
-Framed and grounded along the base and sides by red fly agaric mushrooms with white dots, golden chanterelles, acorns, autumn oak leaves, forest berries, and woodland fern fronds, and accompanied by subtle glowing woodland sprites and tiny sleeping dormice tucked among the leaves.
+Thick, elegant black outlines, translucent and luminous
+deep sapphire indigo, vibrant crimson, luminous gold, and ethereal cyan.
 
-Rich translucent jewel-tone color palette of warm amber gold, fiery autumn orange, deep russet red, forest moss green, deep teal indigo, and dark leaded came metallic outlines.
+High-detail anime art style infused with Art Nouveau
+art nouveau brass filigree frame with celestial star constellations borders.
 
-Enclosed within an intricate Art Nouveau cathedral arched stained-glass frame with curving leadline came tracery, amber glass cabochons, and decorative border tiles.
+Flat lay, purely 2D graphic design, completely flat background.
 
-Authentic leaded came solder outlines, segmented colored glass panes, translucent backlit stained glass radiance, Louis Comfort Tiffany stained glass style, fine Art Nouveau botanical tracery, subtle glass textures and beveled leadlines.
+Centered vertical composition, perfectly cropped for a rectangular print canvas.
 
-Pure 2D flat-lay graphic art print, vertical 9:16 aspect ratio, clean full-bleed decorative art piece, sharp fine details, high-end collector print.
+No shading or 3D depth outside of the anime illustration style.
 
-Do not include: phone, phone case, mockup, device, realistic photography, 3D render, modern clutter, shadows.`,
+Aspect ratio: 9:16.
+
+Do not include:
+phone, phone case, mockup, device, shadows, 3D render, realistic photography.`,
   imageUrl: '/src/assets/images/sample_vitrail_pure2d_1790462384613.jpg',
-  niche: 'Woodland Fox & Sunburst (Stained Glass)',
+  niche: 'Anime Vitrail (Stained Glass)',
   createdAt: Date.now(),
   placeholders: {
     SUBJECT_POSE:
-      'a peaceful sleeping red fox curled in a tight circle with fluffy tail wrapped around its body',
-    HALO_BACKGROUND:
-      'a radiant segmented sunburst halo with glowing amber and golden glass rays, with a golden crescent moon and twinkling stars in the upper arch',
-    BOTANICAL:
-      'red fly agaric mushrooms with white dots, golden chanterelles, acorns, autumn oak leaves, forest berries, and woodland fern fronds',
-    COMPANION:
-      'subtle glowing woodland sprites and tiny sleeping dormice tucked among the leaves',
-    COLOR_PALETTE:
-      'warm amber gold, fiery autumn orange, deep russet red, forest moss green, deep teal indigo, and dark leaded came metallic outlines',
-    BORDER_THEME:
-      'Art Nouveau cathedral arched stained-glass frame with curving leadline came tracery, amber glass cabochons, and decorative border tiles',
+      'celestial fox spirit samurai dual-wielding glowing katanas in a dynamic mid-air leap',
+    BOTANICAL: 'cherry blossoms and weeping wisteria branches',
+    COMPANION: 'spirit fox with nine flame tails',
+    COLOR_PALETTE: 'deep sapphire indigo, vibrant crimson, luminous gold, and ethereal cyan',
+    BORDER_THEME: 'art nouveau brass filigree frame with celestial star constellations',
   },
   isPreset: true,
   aspectRatio: '9:16',
@@ -50,7 +50,13 @@ export default function App() {
   const [resetKey, setResetKey] = useState<number>(0);
 
   const handleDesignGenerated = (newDesign: GeneratedDesign) => {
-    setDesigns((prev) => [newDesign, ...prev]);
+    setDesigns((prev) => {
+      const exists = prev.some((d) => d.id === newDesign.id);
+      if (exists) {
+        return prev.map((d) => (d.id === newDesign.id ? newDesign : d));
+      }
+      return [newDesign, ...prev];
+    });
     setActiveDesign(newDesign);
   };
 

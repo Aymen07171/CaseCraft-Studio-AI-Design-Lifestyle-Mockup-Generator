@@ -1,4 +1,50 @@
-import { NichePreset } from '../types';
+import { NichePreset, CaseTypeOption, FrameColor } from '../types';
+
+export const CASE_TYPE_OPTIONS: CaseTypeOption[] = [
+  {
+    id: 'slim',
+    name: 'Slim Case',
+    description: 'Ultra-thin sleek polycarbonate profile with vibrant gloss print',
+    badge: 'Popular',
+    finish: 'liquid-gloss',
+  },
+  {
+    id: 'clear',
+    name: 'Clear Case',
+    description: 'Crystal-clear shock-absorbing hybrid frame with vivid artwork',
+    badge: 'Transparent',
+    finish: 'clear-hybrid',
+  },
+  {
+    id: 'tough',
+    name: 'Tough Case',
+    description: 'Dual-layer armor with impact rubber lining & reinforced corners',
+    badge: 'Heavy Duty',
+    finish: 'tough-armor',
+  },
+  {
+    id: 'silicone',
+    name: 'Silicone Case',
+    description: 'Soft-touch velvet matte liquid silicone finish with anti-glare',
+    badge: 'Velvet Soft',
+    finish: 'velvet-matte',
+  },
+  {
+    id: 'protective',
+    name: 'Protective Case',
+    description: 'Raised camera bevel & drop-protection bumper casing',
+    badge: 'All-Round',
+    finish: 'tough-armor',
+  },
+];
+
+export const FRAME_COLORS: FrameColor[] = [
+  { id: 'natural-titanium', name: 'Natural Titanium', hex: '#8a857d', accentHex: '#c2beb6' },
+  { id: 'obsidian-black', name: 'Obsidian Black', hex: '#1e1f22', accentHex: '#3b3d42' },
+  { id: 'desert-titanium', name: 'Desert Sand Gold', hex: '#a68c74', accentHex: '#dfccb7' },
+  { id: 'white-titanium', name: 'Alpine Silver', hex: '#d9dade', accentHex: '#f1f2f5' },
+  { id: 'deep-violet', name: 'Cosmic Violet', hex: '#392d47', accentHex: '#6d5a85' },
+];
 
 export const NICHE_PRESETS: NichePreset[] = [
   {

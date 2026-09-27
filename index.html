@@ -1,12 +1,47 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script>
+      (function() {
+        const nativeFetch = window.fetch;
+        const origDefProp = Object.defineProperty;
+        let assignedFetch = null;
+        let currentGetter = null;
+        Object.defineProperty = function(obj, prop, descriptor) {
+          if ((obj === window || obj === globalThis || obj === self) && prop === 'fetch') {
+            if (descriptor && typeof descriptor === 'object') {
+              if (descriptor.get) {
+                currentGetter = descriptor.get;
+              }
+              return origDefProp.call(Object, obj, prop, {
+                get: function() {
+                  if (assignedFetch) return assignedFetch;
+                  if (currentGetter) return currentGetter.call(this);
+                  return nativeFetch;
+                },
+                set: function(val) {
+                  assignedFetch = val;
+                  if (descriptor.set) {
+                    try {
+                      descriptor.set.call(this, val);
+                    } catch (_) {}
+                  }
+                },
+                configurable: true,
+                enumerable: descriptor.enumerable ?? true
+              });
+            }
+          }
+          return origDefProp.call(Object, obj, prop, descriptor);
+        };
+      })();
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CaseCraft Design Studio - Free AI Artwork & Graphic Prompt Generator</title>
-    <meta name="description" content="Design custom 2D art with dynamic prompt placeholders and generate photorealistic illustrations for free with Pollinations.ai." />
-    <meta property="og:title" content="CaseCraft Design Studio - Free AI Artwork & Graphic Prompt Generator" />
-    <meta property="og:description" content="Design custom 2D art with dynamic prompt placeholders and generate photorealistic illustrations for free with Pollinations.ai." />
+    <title>CaseCraft Studio - AI Phone Case Design & Lifestyle Mockups</title>
+    <meta name="description" content="Generate niche-customized designs with dynamic prompt placeholders and instantly visualize on photorealistic iPhone & Samsung lifestyle phone case mockups." />
+    <meta property="og:title" content="CaseCraft Studio - AI Phone Case Design & Lifestyle Mockups" />
+    <meta property="og:description" content="Generate niche-customized designs with dynamic prompt placeholders and instantly visualize on photorealistic iPhone & Samsung lifestyle phone case mockups." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
   </head>
@@ -15,4 +50,3 @@
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-
