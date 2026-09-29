@@ -2,7 +2,6 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import fs from 'fs';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 
@@ -15,7 +14,6 @@ const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json({ limit: '25mb' }));
-app.use('/src/assets', express.static(path.resolve(__dirname, 'src/assets')));
 
 // Shared Gemini Client
 const getGeminiClient = () => {
@@ -83,40 +81,133 @@ app.post('/api/generate-design', async (req, res) => {
     return res.json({ imageUrl, text: descriptionText });
   } catch (error: any) {
     console.error('Error generating design:', error);
+    const msg = error?.message || 'Failed to generate design';
+    let userMsg = msg;
+    if (msg.includes('401') || msg.includes('UNAUTHENTICATED') || msg.includes('authentication credential')) {
+      userMsg = 'Invalid authentication credentials. Please select or verify your API key in the AI Studio Secrets panel.';
+    }
     return res.status(500).json({
-      error: error?.message || 'Failed to generate design',
+      error: userMsg,
       details: error?.toString(),
     });
   }
 });
 
-// API: Generate AI Lifestyle Mockup
-app.post('/api/generate-lifestyle', async (req, res) => {
+// Helper to encode image to base64
+async function encodeImagePart(imageUrl: string) {
+  let base64Data = '';
+  let mimeType = 'image/png';
+
+  if (imageUrl.startsWith('data:')) {
+    const match = imageUrl.match(/^data:([^;]+);base64,(.+)$/);
+    if (match) {
+      mimeType = match[1];
+      base64Data = match[2];
+    }
+  } else if (imageUrl.startsWith('/')) {
+    try {
+      const fs = await import('fs');
+      const localPath = path.join(__dirname, imageUrl);
+      if (fs.existsSync(localPath)) {
+        const buf = fs.readFileSync(localPath);
+        base64Data = buf.toString('base64');
+        mimeType = imageUrl.endsWith('.png') ? 'image/png' : 'image/jpeg';
+      }
+    } catch (e) {
+      console.error('Error reading local file:', e);
+    }
+  }
+
+  if (base64Data) {
+    return {
+      inlineData: {
+        mimeType,
+        data: base64Data,
+      },
+    };
+  }
+  return null;
+}
+
+// API: Generate AI Lifestyle Scene using Printify Reference Mockup & Preserved Artwork
+app.post('/api/generate-lifestyle-scene', async (req, res) => {
   try {
-    const { designDescription, device, scenario, aspectRatio = '16:9' } = req.body;
-    if (!designDescription) {
-      return res.status(400).json({ error: 'Design description is required' });
+    const {
+      designImageUrl,
+      productMockupUrl,
+      userScenePrompt,
+      modelName = 'iPhone 15 Pro',
+      brand = 'apple',
+      caseType = 'Tough Case',
+      dimensions,
+      cameraCutoutDesc,
+      variationIndex = 1,
+    } = req.body;
+
+    if (!designImageUrl) {
+      return res.status(400).json({ error: 'Design artwork image is required' });
     }
 
     const ai = getGeminiClient();
     if (!ai) {
       return res.status(503).json({
-        error: 'Gemini API key is not configured.',
+        error: 'Gemini API key is not configured. Please select your API key in AI Studio.',
       });
     }
 
-    const prompt = `A high-end, photorealistic commercial product lifestyle photo of a modern ${device || 'iPhone 16 Pro Max'} phone case featuring a custom graphic: "${designDescription}".
-Setting: ${scenario || 'A stylish person walking outdoors in a sunny city street holding the phone, showing off the sleek phone case'}.
-Realistic lighting, premium materials, high detail, sharp focus on the phone case, subtle reflections, commercial advertising photography style, depth of field.`;
+    const parts: any[] = [];
+
+    // Part 1: High-Priority Preserved Artwork
+    const designPart = await encodeImagePart(designImageUrl);
+    if (designPart) {
+      parts.push(designPart);
+    }
+
+    // Part 2: Product Reference Mockup (Clean 2D Printify Case)
+    if (productMockupUrl) {
+      const mockupPart = await encodeImagePart(productMockupUrl);
+      if (mockupPart) {
+        parts.push(mockupPart);
+      }
+    }
+
+    // Construct the 2-Stage Strict Lifestyle Generation Prompt
+    const cameraDesc = cameraCutoutDesc || (brand === 'apple' ? 'square triple-lens plateau' : 'vertical floating lens array');
+    const dimensionInfo = dimensions ? `${dimensions.pixelWidth}x${dimensions.pixelHeight}px (${dimensions.mmWidth}mm x ${dimensions.mmHeight}mm)` : 'standard printify template dimensions';
+
+    const systemInstructions = `[CRITICAL PRODUCT & ARTWORK PRESERVATION INSTRUCTIONS]:
+You are a master commercial lifestyle product photographer executing a campaign for Printify Tough Phone Cases.
+You are given the user's EXACT uploaded artwork (Image 1) and the physical phone case reference mockup (Image 2).
+
+PRIMARY MANDATES:
+1. PRESERVE THE USER'S ARTWORK EXACTLY:
+   - Do NOT redesign, regenerate, alter, re-color, add elements to, or replace the artwork.
+   - The artwork on the back of the case must be an exact, sharp, full-bleed print reproduction of the provided design.
+2. PRESERVE THE PHYSICAL PHONE CASE GEOMETRY:
+   - Device: ${modelName} (${brand.toUpperCase()}).
+   - Case Type: ${caseType} (dual-layer shockproof bumper, raised camera bevel, rounded edges, authentic dimensions: ${dimensionInfo}).
+   - Camera module cutout: ${cameraDesc}.
+   - The phone MUST maintain authentic ${brand === 'apple' ? 'iPhone' : 'Samsung'} proportions and cutouts.
+3. THE BACK OF THE PHONE MUST BE PROMINENTLY VISIBLE:
+   - The phone must be positioned naturally in the person's hand, facing the camera so the back case art is clearly visible, sharp, and recognizable.
+   - Realistic hand anatomy: natural grip around the sides, authentic thumb/finger placement on the perimeter bumper without obscuring the artwork.
+4. LIFESTYLE ENVIRONMENT & CONTEXT:
+   - Scene: "${userScenePrompt || 'A person talking with a friend while casually holding their phone, with the back of the phone case facing the camera.'}"
+   - Style: Professional 35mm f/2.0 commercial lifestyle photography, cinematic natural lighting, realistic contact shadows, subtle reflections on the glossy/matte case surface, photorealistic depth of field.
+   - Variation: #${variationIndex}. Ensure unique natural pose and lighting nuance.
+
+OUTPUT: A single photorealistic photograph.`;
+
+    parts.push({ text: systemInstructions });
 
     const response = await ai.models.generateContent({
       model: 'gemini-3.1-flash-lite-image',
       contents: {
-        parts: [{ text: prompt }],
+        parts,
       },
       config: {
         imageConfig: {
-          aspectRatio: aspectRatio as '16:9' | '4:3' | '1:1',
+          aspectRatio: '4:3',
         },
       },
     });
@@ -132,14 +223,123 @@ Realistic lighting, premium materials, high detail, sharp focus on the phone cas
     }
 
     if (!imageUrl) {
-      return res.status(500).json({ error: 'Failed to generate lifestyle mockup' });
+      return res.status(500).json({ error: 'Failed to generate lifestyle scene' });
     }
 
     return res.json({ imageUrl });
   } catch (error: any) {
-    console.error('Error generating lifestyle mockup:', error);
+    console.error('Error generating lifestyle scene:', error);
+    const msg = error?.message || 'Failed to generate lifestyle scene';
+    let userMsg = msg;
+    if (msg.includes('401') || msg.includes('UNAUTHENTICATED') || msg.includes('authentication credential')) {
+      userMsg = 'Invalid authentication credentials. Please select or verify your API key in the AI Studio Secrets panel.';
+    }
     return res.status(500).json({
-      error: error?.message || 'Failed to generate lifestyle mockup',
+      error: userMsg,
+    });
+  }
+});
+
+app.post('/api/generate-case-mockup', async (req, res) => {
+  try {
+    const { designDescription, designImageUrl, device = 'iphone-16-pro', caseType = 'slim' } = req.body;
+    if (!designDescription && !designImageUrl) {
+      return res.status(400).json({ error: 'Design description or image is required' });
+    }
+
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.status(503).json({
+        error: 'Gemini API key is not configured.',
+      });
+    }
+
+    const parts: any[] = [];
+
+    // If design image provided, pass as inline image part for in-context rendering
+    if (designImageUrl) {
+      let base64Data = '';
+      let mimeType = 'image/png';
+
+      if (designImageUrl.startsWith('data:')) {
+        const match = designImageUrl.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          mimeType = match[1];
+          base64Data = match[2];
+        }
+      } else if (designImageUrl.startsWith('/')) {
+        try {
+          const fs = await import('fs');
+          const localPath = path.join(__dirname, designImageUrl);
+          if (fs.existsSync(localPath)) {
+            const buf = fs.readFileSync(localPath);
+            base64Data = buf.toString('base64');
+            mimeType = designImageUrl.endsWith('.png') ? 'image/png' : 'image/jpeg';
+          }
+        } catch (e) {
+          console.error('Error reading local artwork file:', e);
+        }
+      }
+
+      if (base64Data) {
+        parts.push({
+          inlineData: {
+            mimeType,
+            data: base64Data,
+          },
+        });
+      }
+    }
+
+    const isIphone = device.toLowerCase().includes('iphone');
+    const deviceName = isIphone ? 'Apple iPhone 16 Pro' : 'Samsung Galaxy S25 Ultra';
+    const cameraDesc = isIphone
+      ? 'square rounded camera plateau with triple triangular lenses in top-left'
+      : 'floating vertical column of circular camera lenses in top-left';
+
+    const promptText = `A crisp, photorealistic commercial product photograph of a modern ${deviceName} phone case (${caseType} edition) standing centered upright against a seamless studio cyclorama backdrop.
+The back surface of the phone case has the exact provided artwork seamlessly printed across it with crisp edge-to-edge full bleed wrap.
+Accurately render the ${deviceName} physical geometry: ${cameraDesc}, precise case rounded corners, tactile side buttons, natural surface curvature, soft studio floor contact drop shadow, subtle specular gloss highlights along the perimeter bevel.
+Clean e-commerce product catalog shot. No hands, no people, no lifestyle background clutter.`;
+
+    parts.push({ text: promptText });
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-flash-lite-image',
+      contents: {
+        parts,
+      },
+      config: {
+        imageConfig: {
+          aspectRatio: '1:1',
+        },
+      },
+    });
+
+    let imageUrl: string | null = null;
+    if (response.candidates?.[0]?.content?.parts) {
+      for (const part of response.candidates[0].content.parts) {
+        if (part.inlineData) {
+          imageUrl = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
+          break;
+        }
+      }
+    }
+
+    if (!imageUrl) {
+      return res.status(500).json({ error: 'Failed to generate case mockup' });
+    }
+
+    return res.json({ imageUrl });
+  } catch (error: any) {
+    console.error('Error generating case mockup:', error);
+    const msg = error?.message || 'Failed to generate case mockup';
+    let userMsg = msg;
+    if (msg.includes('401') || msg.includes('UNAUTHENTICATED') || msg.includes('authentication credential')) {
+      userMsg = 'Invalid authentication credentials. Please select or verify your API key in the AI Studio Secrets panel.';
+    }
+    return res.status(500).json({
+      error: userMsg,
     });
   }
 });
@@ -182,269 +382,103 @@ Return ONLY a JSON array of 6 short strings (e.g. ["option 1", "option 2", ...])
   }
 });
 
-// Helper: High-fidelity tailored fallback generator
-function generateTailoredEtsyListingFallback(
-  prompt: string,
-  title: string,
-  niche: string,
-  placeholders: Record<string, string>,
-  deviceFocus: string,
-  caseStyle: string
-) {
-  const subject = placeholders.SUBJECT_POSE || placeholders.CHARACTER || title || 'Celestial Art';
-  const botanical = placeholders.BOTANICAL || placeholders.NATURE || '';
-  const color = placeholders.COLOR_PALETTE || placeholders.PALETTE || 'Vibrant Luminous Tones';
+// API: Printify Shops Proxy with Resilient Error Interceptor and Fallback Active Flags
+app.post('/api/printify/shops', async (req, res) => {
+  const { apiKey } = req.body;
+  if (!apiKey) {
+    return res.status(400).json({ error: 'Printify API key is required' });
+  }
 
-  const cleanSubject = subject.split(',')[0].trim().slice(0, 32);
-  const primaryTitle = `${cleanSubject} Phone Case, ${niche.slice(0, 24)} iPhone 16 15 14 Pro Max Case, Aesthetic Tough Cover`.slice(0, 138);
-
-  const tags = [
-    `${cleanSubject.slice(0, 15)} case`.toLowerCase(),
-    'iphone 16 pro case',
-    'iphone 15 case',
-    `${niche.slice(0, 14)} case`.toLowerCase(),
-    'aesthetic phone case',
-    'tough phone case',
-    'unique gift for her',
-    'unique gift for him',
-    'custom phone cover',
-    'artistic phone case',
-    'wireless charging',
-    'phone case gift',
-    'protective case',
-  ].map((t) => t.slice(0, 20));
-
-  return {
-    title: primaryTitle,
-    description: `✨ Elevate your everyday aesthetic with this premium ${niche} phone case featuring "${cleanSubject}". Custom-crafted for art lovers who demand both museum-grade visual beauty and military-grade protection.\n\n🎨 THE ARTWORK & INSPIRATION\nThis design showcases ${subject}${botanical ? ` surrounded by ${botanical}` : ''}. The composition is rendered in an evocative palette of ${color}, creating an enchanting visual that turns your phone into a handheld masterpiece.\n\n🛡️ PREMIUM PHONE CASE SPECIFICATIONS\n• Dual-Layer Tough Case: Shock-absorbent TPU inner bumper combined with an impact-resistant polycarbonate outer shell\n• Slim Snap Alternative: Lightweight, sleek profile that slips effortlessly into pockets without added bulk\n• Screen & Camera Shield: 1.5mm raised bevel prevents lens and glass scratching on flat surfaces\n• Full Wireless Charging: Fully compatible with Qi wireless chargers and modern accessories\n• Lifetime Fade-Proof Print: High-definition sub-surface UV sublimation will never scratch, peel, or fade\n• Precision Engineered: Smooth, responsive button covers and crystal-clear cutouts for all ports\n\n📱 SUPPORTED DEVICES\n• iPhone 16, 16 Pro, 16 Pro Max, 16 Plus\n• iPhone 15, 15 Pro, 15 Pro Max, 15 Plus\n• iPhone 14, 13, 12, 11 Series\n• Samsung Galaxy S24 Ultra, S24+, S24, S23 Series\n\n🎁 THE PERFECT GIFT\nAn unforgettable present for anime fans, art collectors, and anyone who appreciates bespoke graphic design.\n\n🧼 CARE INSTRUCTIONS\nWipe gently with a soft, damp microfiber cloth. Avoid harsh abrasive cleaners.`,
-    primaryKeywords: [
-      `${cleanSubject} phone case`,
-      `${niche} phone case`,
-      'iPhone 16 Pro Max case',
-      'aesthetic tough case',
-      'protective phone cover',
-      'artistic phone case',
-    ],
-    longTailKeywords: [
-      `${cleanSubject} iphone 16 case`,
-      `${niche} protective phone case`,
-      `aesthetic ${cleanSubject} cover`,
-      'dual layer tough phone case',
-      'unique artistic phone case gift',
-      'japanese art phone cover',
-    ],
-    etsyTags: tags,
-    targetCustomer: [
-      `${niche} Enthusiasts`,
-      'Aesthetic Tech Accessories Collectors',
-      'Art & Illustration Lovers',
-      'Unique Gift Hunters',
-      'Pop Culture & Fantasy Fans',
-    ],
-    designStyle: [
-      niche,
-      'Detailed Graphic Illustration',
-      'Intricate Linework',
-      'Luminous Color Vibrancy',
-    ],
-    searchIntent: `Shoppers actively searching for a standout, protective phone case featuring ${cleanSubject} in a distinct ${niche} aesthetic that expresses personal taste and shields their device.`,
-    keywordRationale: `The primary keywords capture essential high-volume search traffic for iPhone and protective tough cases, while the long-tail keywords target high-intent niche shoppers searching specifically for ${cleanSubject} and ${niche} art styles.`,
-  };
-}
-
-// API: Generate Complete Etsy Product Listing
-app.post('/api/generate-etsy-listing', async (req, res) => {
   try {
-    const {
-      prompt,
-      title = 'Custom Artistic Phone Case',
-      niche = 'Artistic Graphic Design',
-      placeholders = {},
-      imageUrl,
-      deviceFocus = 'iPhone 16 / 15 / 14 Pro Max & Samsung Galaxy S24',
-      caseStyle = 'Dual-Layer Tough Impact Case & Slim Snap Case',
-    } = req.body;
-
-    if (!prompt) {
-      return res.status(400).json({ error: 'Design prompt is required' });
-    }
-
-    const ai = getGeminiClient();
-
-    // Multimodal image extraction
-    let imagePart: any = null;
-    if (imageUrl && typeof imageUrl === 'string') {
-      try {
-        if (imageUrl.startsWith('data:')) {
-          const match = imageUrl.match(/^data:([^;]+);base64,(.+)$/);
-          if (match) {
-            imagePart = {
-              inlineData: {
-                mimeType: match[1],
-                data: match[2],
-              },
-            };
-          }
-        } else if (imageUrl.startsWith('/src/') || imageUrl.startsWith('src/')) {
-          const cleanPath = imageUrl.startsWith('/') ? imageUrl.slice(1) : imageUrl;
-          const absPath = path.resolve(__dirname, cleanPath);
-          if (fs.existsSync(absPath)) {
-            const buffer = fs.readFileSync(absPath);
-            const ext = path.extname(absPath).toLowerCase();
-            const mimeType = ext === '.png' ? 'image/png' : 'image/jpeg';
-            imagePart = {
-              inlineData: {
-                mimeType,
-                data: buffer.toString('base64'),
-              },
-            };
-          }
-        }
-      } catch (imgErr) {
-        console.warn('Could not read image for multimodal analysis, continuing with prompt:', imgErr);
+    const response = await fetch('https://api.printify.com/v1/shops.json', {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'User-Agent': 'CaseCraft-Studio-AI-Design'
       }
-    }
-
-    let parsedResult: any = null;
-
-    if (ai) {
-      const systemInstruction = `You are a world-class Etsy E-Commerce SEO Specialist, Creative Copywriter, and Commercial Merchandising Expert specializing in viral, top-ranking phone cases.
-
-You will analyze the actual phone case artwork design (if provided in image) and the original image-generation prompt used to create it:
-Original Prompt: "${prompt}"
-Design Title: "${title}"
-Niche Category: "${niche}"
-Specific Placeholders: ${JSON.stringify(placeholders)}
-Target Phone Devices: "${deviceFocus}"
-Case Construction: "${caseStyle}"
-
-YOUR OBJECTIVE:
-Analyze the product's visual style, subject matter, theme, color palette, artistic style, mood, and target audience.
-Create a complete, authentic, commercially ready Etsy listing that is specifically tailored to this exact artwork. Do NOT generate generic or boilerplate filler.
-
-REQUIREMENTS:
-1. PRODUCT TITLE:
-- Craft an irresistible, SEO-optimized Etsy title between 110 and 138 characters (Etsy maximum is 140 characters).
-- Clearly identify the product as an iPhone/phone case (e.g. "Stained Glass Kitsune Fox Phone Case, Japanese Anime Art Nouveau iPhone 16 15 14 Pro Max Case, Mythical Celestial Animal Gift").
-- Front-load high-intent, high-volume search phrases.
-- Combine broad keywords with specific descriptive terms based on the actual artwork.
-- Must be attractive and readable for real buyers—NO robotic keyword stuffing.
-
-2. PRODUCT DESCRIPTION:
-- Persuasive, professional Etsy product description formatted with short paragraphs, clear section headers, and bullet points.
-- Compelling opening hook highlighting the artwork's specific mood and beauty.
-- Detailed description of the artwork: the visual story, colors, artistic influences, and what makes it extraordinary.
-- Practical Phone Case Highlights (Tough dual-layer silicone + polycarbonate, raised 1.5mm screen/camera bezels, wireless charging / MagSafe compatible, UV print that will never fade, peel, or scratch).
-- Device Compatibility section (iPhone 16, 16 Pro, 16 Pro Max, 16 Plus, 15, 14, 13, 12, 11; Samsung Galaxy S24 Ultra, S24+, S24, S23).
-- "Perfect Gift For..." section tailored specifically to the target audience.
-- Quality Guarantee & Care Instructions.
-- Professional, premium, and creative tone.
-
-3. PRIMARY KEYWORDS:
-- 6 to 8 highest-priority core keywords with strong commercial buyer intent.
-
-4. LONG-TAIL KEYWORDS:
-- 6 to 10 highly specific search phrases that shoppers would type when searching for this unique design (e.g. "stained glass fox phone case", "art nouveau celestial kitsune case", etc.).
-
-5. ETSY TAGS:
-- EXACTLY 13 Etsy tags (Etsy allows up to 13 tags).
-- STRICT CONSTRAINT: Every single tag MUST be 20 characters or fewer (including spaces and punctuation). This is a strict platform limit on Etsy.
-- Only generate tags that genuinely fit the design.
-
-6. TARGET CUSTOMER:
-- 4 to 6 specific customer personas inferred directly from the design (e.g., Anime & Manga Lovers, Art Nouveau Collectors, Cottagecore Enthusiasts, Fox Lovers, Fantasy Gamers).
-
-7. DESIGN STYLE:
-- Main artistic movements, techniques, and aesthetic motifs present in the design.
-
-8. SEARCH INTENT:
-- What customers are searching for and why they are drawn to this phone case.
-
-9. KEYWORD RATIONALE:
-- Clear breakdown of the chain: Design → Customer Intent → Search Query → Etsy Listing, detailing why the primary and long-tail keywords were selected.
-
-Return ONLY a valid JSON object matching this schema:
-{
-  "title": "string",
-  "description": "string",
-  "primaryKeywords": ["string"],
-  "longTailKeywords": ["string"],
-  "etsyTags": ["string"],
-  "targetCustomer": ["string"],
-  "designStyle": ["string"],
-  "searchIntent": "string",
-  "keywordRationale": "string"
-}`;
-
-      const contents: any[] = [];
-      if (imagePart) {
-        contents.push(imagePart);
-      }
-      contents.push({ text: systemInstruction });
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents,
-        config: {
-          responseMimeType: 'application/json',
-        },
-      });
-
-      try {
-        parsedResult = JSON.parse(response.text || '{}');
-      } catch (jsonErr) {
-        console.error('Failed to parse Gemini JSON response:', jsonErr, response.text);
-      }
-    }
-
-    if (!parsedResult || !parsedResult.title) {
-      parsedResult = generateTailoredEtsyListingFallback(prompt, title, niche, placeholders, deviceFocus, caseStyle);
-    }
-
-    // Ensure tags are strictly <= 20 chars each and array of strings
-    if (Array.isArray(parsedResult.etsyTags)) {
-      parsedResult.etsyTags = parsedResult.etsyTags
-        .map((t: string) => (typeof t === 'string' ? t.trim().slice(0, 20) : ''))
-        .filter((t: string) => t.length > 0)
-        .slice(0, 13);
-    }
-
-    const formattedOutput = `PRODUCT TITLE
-${parsedResult.title}
-
-PRODUCT DESCRIPTION
-${parsedResult.description}
-
-PRIMARY KEYWORDS
-${(parsedResult.primaryKeywords || []).map((k: string) => `- ${k}`).join('\n')}
-
-LONG-TAIL KEYWORDS
-${(parsedResult.longTailKeywords || []).map((k: string) => `- ${k}`).join('\n')}
-
-ETSY TAGS
-${(parsedResult.etsyTags || []).join(', ')}
-
-TARGET CUSTOMER
-${(parsedResult.targetCustomer || []).map((c: string) => `- ${c}`).join('\n')}
-
-DESIGN STYLE
-${(parsedResult.designStyle || []).map((s: string) => `- ${s}`).join('\n')}
-
-SEARCH INTENT
-${parsedResult.searchIntent}
-
-KEYWORD RATIONALE
-${parsedResult.keywordRationale}`;
-
-    return res.json({
-      ...parsedResult,
-      formattedOutput,
-      createdAt: Date.now(),
     });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.warn('Printify API error response:', response.status, errorText);
+      return res.status(response.status).json({
+        error: `Printify API returned status ${response.status}`,
+        details: errorText,
+        isGatewayError: response.status >= 502 || errorText.includes('502') || errorText.includes('Cloudflare'),
+        fallbackActive: true
+      });
+    }
+
+    const data = await response.json();
+    return res.json({ shops: data, fallbackActive: false });
   } catch (error: any) {
-    console.error('Error generating Etsy listing:', error);
-    return res.status(500).json({
-      error: error?.message || 'Failed to generate Etsy listing',
+    console.error('Error fetching Printify shops:', error);
+    return res.status(502).json({
+      error: 'Printify Connection Failed',
+      details: error?.message || 'Printify API returned a Gateway Error (502) or is temporarily down with Cloudflare.',
+      isGatewayError: true,
+      fallbackActive: true
+    });
+  }
+});
+
+// API: Printify Products Proxy with Resilient Error Interceptor and Fallback Active Flags
+app.post('/api/printify/products', async (req, res) => {
+  const { apiKey, shopId } = req.body;
+  if (!apiKey) {
+    return res.status(400).json({ error: 'Printify API key is required' });
+  }
+
+  try {
+    let actualShopId = shopId;
+    if (!actualShopId) {
+      const shopRes = await fetch('https://api.printify.com/v1/shops.json', {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'User-Agent': 'CaseCraft-Studio-AI-Design'
+        }
+      });
+      if (shopRes.ok) {
+        const shops = await shopRes.json();
+        if (shops && shops.length > 0) {
+          actualShopId = shops[0].id;
+        }
+      }
+    }
+
+    if (!actualShopId) {
+      return res.status(404).json({
+        error: 'No active shop found on this Printify account',
+        isGatewayError: false,
+        fallbackActive: true
+      });
+    }
+
+    const response = await fetch(`https://api.printify.com/v1/shops/${actualShopId}/products.json`, {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'User-Agent': 'CaseCraft-Studio-AI-Design'
+      }
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return res.status(response.status).json({
+        error: `Printify API returned status ${response.status}`,
+        details: errorText,
+        isGatewayError: response.status >= 502 || errorText.includes('502') || errorText.includes('Cloudflare'),
+        fallbackActive: true
+      });
+    }
+
+    const data = await response.json();
+    return res.json({ products: data.data || data, fallbackActive: false, shopId: actualShopId });
+  } catch (error: any) {
+    console.error('Error fetching Printify products:', error);
+    return res.status(502).json({
+      error: 'Printify Connection Failed',
+      details: error?.message || 'Printify API returned a Gateway Error (502) or is temporarily down with Cloudflare.',
+      isGatewayError: true,
+      fallbackActive: true
     });
   }
 });

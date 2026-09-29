@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
-import { Header } from './components/Header';
-import { DesignStudio } from './components/DesignStudio';
+import { Header, ActiveTab } from './components/Header';
+import { PromptBuilder } from './components/PromptBuilder';
+import { MockupStudio } from './components/MockupStudio';
+import { LifestyleStudio } from './components/LifestyleStudio';
+import { DesignGallery } from './components/DesignGallery';
 import { GeneratedDesign } from './types';
+import { generateProductMockupCanvas, triggerDownload } from './utils/exportMockup';
 
 const INITIAL_VITRAIL_DESIGN: GeneratedDesign = {
   id: 'preset-sample-vitrail-01',
@@ -41,88 +45,112 @@ phone, phone case, mockup, device, shadows, 3D render, realistic photography.`,
     BORDER_THEME: 'art nouveau brass filigree frame with celestial star constellations',
   },
   isPreset: true,
-  aspectRatio: '9:16',
 };
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState<ActiveTab>('prompt-studio');
   const [designs, setDesigns] = useState<GeneratedDesign[]>([INITIAL_VITRAIL_DESIGN]);
-  const [activeDesign, setActiveDesign] = useState<GeneratedDesign | null>(INITIAL_VITRAIL_DESIGN);
-  const [resetKey, setResetKey] = useState<number>(0);
+  const [activeDesign, setActiveDesign] = useState<GeneratedDesign>(INITIAL_VITRAIL_DESIGN);
 
+  // When a new design is generated or selected -> auto navigate to mockups
   const handleDesignGenerated = (newDesign: GeneratedDesign) => {
-    setDesigns((prev) => {
-      const exists = prev.some((d) => d.id === newDesign.id);
-      if (exists) {
-        return prev.map((d) => (d.id === newDesign.id ? newDesign : d));
-      }
-      return [newDesign, ...prev];
-    });
+    setDesigns((prev) => [newDesign, ...prev]);
     setActiveDesign(newDesign);
+    setActiveTab('mockup-studio');
   };
 
   const handleSelectDesign = (design: GeneratedDesign) => {
     setActiveDesign(design);
+    setActiveTab('mockup-studio');
   };
 
-  const handleDeleteDesign = (id: string) => {
-    setDesigns((prev) => {
-      const filtered = prev.filter((d) => d.id !== id);
-      if (activeDesign?.id === id) {
-        setActiveDesign(filtered.length > 0 ? filtered[0] : null);
-      }
-      return filtered;
-    });
+  const handleUploadDesign = (uploadedDesign: GeneratedDesign) => {
+    setDesigns((prev) => [uploadedDesign, ...prev]);
+    setActiveDesign(uploadedDesign);
+    // Instant automatic transition to iPhone + Samsung mockups on upload!
+    setActiveTab('mockup-studio');
   };
 
-  const handleReset = () => {
-    setResetKey((prev) => prev + 1);
-  };
-
-  const handleDownloadCurrent = () => {
+  // Quick export from Header (Exports both iPhone + Samsung)
+  const handleQuickExport = async () => {
     if (!activeDesign) return;
-    const link = document.createElement('a');
-    link.href = activeDesign.imageUrl;
-    link.download = `${activeDesign.title.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${Date.now()}.jpg`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    try {
+      const iphoneDataUrl = await generateProductMockupCanvas({
+        artworkUrl: activeDesign.imageUrl,
+        device: 'iphone-16-pro',
+        finish: 'liquid-gloss',
+        frameColorId: 'obsidian-black',
+        showMagsafe: false,
+        glossIntensity: 80,
+      });
+      triggerDownload(iphoneDataUrl, `iphone-16-pro-mockup-${Date.now()}.png`);
+
+      setTimeout(async () => {
+        const samsungDataUrl = await generateProductMockupCanvas({
+          artworkUrl: activeDesign.imageUrl,
+          device: 'samsung-s25-ultra',
+          finish: 'liquid-gloss',
+          frameColorId: 'obsidian-black',
+          showMagsafe: false,
+          glossIntensity: 80,
+        });
+        triggerDownload(samsungDataUrl, `samsung-s25-ultra-mockup-${Date.now()}.png`);
+      }, 300);
+    } catch (err) {
+      console.error('Quick export failed:', err);
+    }
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
-      {/* Top Header */}
+      {/* Top Navigation */}
       <Header
-        onReset={handleReset}
-        onDownloadCurrent={activeDesign ? handleDownloadCurrent : undefined}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onExportCurrent={handleQuickExport}
         hasArtwork={Boolean(activeDesign)}
-        activeDesignTitle={activeDesign?.title}
       />
 
-      {/* Main Design Studio Area */}
+      {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <DesignStudio
-          key={resetKey}
-          activeDesign={activeDesign}
-          designs={designs}
-          onSelectDesign={handleSelectDesign}
-          onDeleteDesign={handleDeleteDesign}
-          onDesignGenerated={handleDesignGenerated}
-        />
+        {activeTab === 'prompt-studio' && (
+          <PromptBuilder
+            onDesignGenerated={(newDesign) => {
+              handleDesignGenerated(newDesign);
+            }}
+            activeDesign={activeDesign}
+            onNavigateToMockups={() => setActiveTab('mockup-studio')}
+          />
+        )}
+
+        {activeTab === 'mockup-studio' && (
+          <MockupStudio
+            activeDesign={activeDesign}
+            onUploadNew={() => setActiveTab('design-library')}
+          />
+        )}
+
+        {activeTab === 'lifestyle-studio' && (
+          <LifestyleStudio
+            activeDesign={activeDesign}
+            onNavigateToGallery={() => setActiveTab('design-library')}
+          />
+        )}
+
+        {activeTab === 'design-library' && (
+          <DesignGallery
+            designs={designs}
+            activeDesignId={activeDesign?.id || ''}
+            onSelectDesign={handleSelectDesign}
+            onUploadDesign={handleUploadDesign}
+            onOpenMockupStudio={() => setActiveTab('mockup-studio')}
+          />
+        )}
       </main>
 
       {/* Footer */}
       <footer className="border-t border-slate-800/80 bg-slate-950/80 py-4 text-center text-xs text-slate-500">
-        <p>
-          CaseCraft Design Studio • Powered by{' '}
-          <a
-            href="https://pollinations.ai"
-            target="_blank"
-            rel="noreferrer"
-            className="text-indigo-400 hover:underline"
-          >
-            Pollinations API
-          </a>
-        </p>
+        <p>CaseCraft Studio • Automatic iPhone & Samsung Phone Case Mockup Generator</p>
       </footer>
     </div>
   );

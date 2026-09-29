@@ -1,4 +1,23 @@
-export type AspectRatio = '9:16' | '1:1' | '3:4' | '4:3' | '16:9';
+export type DeviceType = 'iphone-16-pro' | 'samsung-s25-ultra';
+
+export type CaseType = 'slim' | 'clear' | 'tough' | 'silicone' | 'protective';
+
+export type CaseFinish = 'liquid-gloss' | 'velvet-matte' | 'clear-hybrid' | 'tough-armor';
+
+export interface CaseTypeOption {
+  id: CaseType;
+  name: string;
+  description: string;
+  badge: string;
+  finish: CaseFinish;
+}
+
+export type FrameColor = {
+  id: string;
+  name: string;
+  hex: string;
+  accentHex: string;
+};
 
 export interface PlaceholderField {
   tag: string; // e.g. "SUBJECT_POSE"
@@ -16,7 +35,6 @@ export interface NichePreset {
   template: string;
   defaultPlaceholders: PlaceholderField[];
   sampleImage?: string;
-  defaultAspectRatio?: AspectRatio;
 }
 
 export interface GeneratedDesign {
@@ -24,28 +42,70 @@ export interface GeneratedDesign {
   title: string;
   prompt: string;
   imageUrl: string;
-  sourceUrl?: string;
   niche: string;
   createdAt: number;
   placeholders: Record<string, string>;
   isPreset?: boolean;
-  seed?: number;
-  aspectRatio?: AspectRatio;
-  width?: number;
-  height?: number;
-  etsyListing?: EtsyListing;
 }
 
-export interface EtsyListing {
+export interface MockupItem {
+  id: string;
+  device: DeviceType;
+  deviceName: string;
+  platform: 'iphone' | 'samsung';
+  caseType: CaseType;
+  caseTypeName: string;
+  finish: CaseFinish;
+  frameColorId: string;
+  artworkUrl: string;
+  designTitle: string;
+  renderUrl?: string;
+}
+
+export type SkinTone = 'fair' | 'honey' | 'bronze' | 'deep';
+
+export interface PresetLifestyleScenario {
+  id: string;
   title: string;
+  category: 'social' | 'outdoor' | 'cafe' | 'work' | 'everyday';
   description: string;
-  primaryKeywords: string[];
-  longTailKeywords: string[];
-  etsyTags: string[];
-  targetCustomer: string[];
-  designStyle: string[];
-  searchIntent: string;
-  keywordRationale: string;
-  formattedOutput: string;
+  prompt: string;
+  cameraAngle: string;
+  personPose: string;
+}
+
+export interface GeneratedLifestyleMockup {
+  id: string;
+  sceneTitle: string;
+  userPrompt: string;
+  modelName: string;
+  brand: 'apple' | 'samsung';
+  caseType: CaseType;
+  imageUrl: string;
+  designId: string;
+  designTitle: string;
   createdAt: number;
+  variationIndex?: number;
+}
+
+
+export interface MockupConfig {
+  device: DeviceType;
+  finish: CaseFinish;
+  frameColor: string;
+  showMagsafe: boolean;
+  glossIntensity: number; // 0 - 100
+  caseScale: number; // 0.6 - 1.4
+  caseRotation: number; // -45 to 45
+  rotateX: number;
+  rotateY: number;
+  caseOffsetX: number; // px
+  caseOffsetY: number; // px
+  artworkZoom: number; // 0.8 - 1.5
+  artworkShiftY: number; // px
+  showHands: boolean;
+  skinTone: SkinTone;
+  blendMode?: 'normal' | 'multiply' | 'overlay' | 'soft-light';
+  showTitleBadge?: boolean;
+  customTitle?: string;
 }
